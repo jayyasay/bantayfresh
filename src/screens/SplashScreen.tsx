@@ -85,7 +85,7 @@ export default function SplashScreen() {
         >
           <SplashMarkWrap>
             <SplashGlow />
-            <BrandMark />
+            <BrandMark showFrame={false} fillParent />
           </SplashMarkWrap>
         </Animated.View>
 

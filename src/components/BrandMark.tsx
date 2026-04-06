@@ -1,4 +1,5 @@
 import { View, styled } from "@tamagui/core";
+import { Image } from "react-native";
 
 import { COLORS } from "../theme/colors";
 
@@ -13,64 +14,64 @@ const MarkFrame = styled(View, {
   overflow: "hidden",
 });
 
-const MarkInner = styled(View, {
+const MarkIconWrap = styled(View, {
   position: "absolute",
-  inset: 12,
-  borderRadius: 24,
-  borderWidth: 1,
-  borderColor: "rgba(234,251,241,0.22)",
+  alignItems: "center",
+  justifyContent: "center",
 });
 
-const MarkCircle = styled(View, {
-  position: "absolute",
-  top: 16,
-  left: 16,
-  width: 28,
-  height: 28,
-  borderRadius: 999,
-  borderWidth: 3,
-  borderColor: COLORS.mist,
-});
+type BrandMarkProps = {
+  size?: number;
+  showFrame?: boolean;
+  fillParent?: boolean;
+};
 
-const MarkRing = styled(View, {
-  position: "absolute",
-  width: 52,
-  height: 52,
-  borderRadius: 999,
-  borderWidth: 9,
-  borderColor: COLORS.mist,
-  borderRightColor: "transparent",
-  transform: [{ rotate: "18deg" }],
-});
+export default function BrandMark({ size = 108, showFrame = true, fillParent = false }: BrandMarkProps) {
+  if (!showFrame) {
+    return (
+      <View
+        accessibilityLabel="BantayFresh brand mark"
+        style={{
+          width: fillParent ? "100%" : size,
+          height: fillParent ? "100%" : size,
+        }}
+      >
+        <Image
+          source={require("../../assets/bantay-logo.webp")}
+          resizeMode="contain"
+          style={{ width: "100%", height: "100%" }}
+        />
+      </View>
+    );
+  }
 
-const MarkStem = styled(View, {
-  position: "absolute",
-  bottom: 14,
-  width: 11,
-  height: 40,
-  borderRadius: 999,
-  backgroundColor: COLORS.mist,
-});
+  const scale = size / 108;
+  const frameRadius = 30 * scale;
+  const innerInset = 12 * scale;
+  const innerRadius = 24 * scale;
+  const iconInset = 18 * scale;
 
-const MarkLeaf = styled(View, {
-  position: "absolute",
-  right: 20,
-  top: 38,
-  width: 34,
-  height: 22,
-  borderRadius: 999,
-  backgroundColor: COLORS.mist,
-  transform: [{ rotate: "-36deg" }],
-});
-
-export default function BrandMark() {
   return (
-    <MarkFrame accessibilityLabel="BantayFresh brand mark">
-      <MarkInner />
-      <MarkCircle />
-      <MarkRing />
-      <MarkStem />
-      <MarkLeaf />
+    <MarkFrame
+      accessibilityLabel="BantayFresh brand mark"
+      style={{ width: size, height: size, borderRadius: frameRadius }}
+    >
+      <View
+        style={{
+          position: "absolute",
+          inset: innerInset,
+          borderRadius: innerRadius,
+          borderWidth: 1,
+          borderColor: "rgba(234,251,241,0.22)",
+        }}
+      />
+      <MarkIconWrap style={{ inset: iconInset }}>
+        <Image
+          source={require("../../assets/bantay-logo.webp")}
+          resizeMode="contain"
+          style={{ width: "100%", height: "100%" }}
+        />
+      </MarkIconWrap>
     </MarkFrame>
   );
 }

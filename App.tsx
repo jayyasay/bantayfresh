@@ -35,7 +35,15 @@ const Screen = styled(View, {
 
 type RootStackParamList = {
   BulkUpload: undefined;
-  CreateItem: undefined;
+  CreateItem:
+    | {
+        prefill?: {
+          barcode?: string | null;
+          category?: string | null;
+          name?: string | null;
+        };
+      }
+    | undefined;
   DashboardMain: undefined;
   EditItem: { item: PantryItemRecord };
   ExpiredItems: undefined;
@@ -283,7 +291,11 @@ export default function App() {
                     isProfileLoading={isProfileLoading}
                     onLogout={handleLogout}
                     onOpenBulkUpload={() => navigation.navigate("BulkUpload")}
-                    onOpenCreate={() => navigation.navigate("CreateItem")}
+                    onOpenCreate={(prefill) =>
+                      navigation.navigate("CreateItem", {
+                        prefill,
+                      })
+                    }
                     onOpenEdit={(item) =>
                       navigation.navigate("EditItem", {
                         item,
@@ -330,10 +342,11 @@ export default function App() {
                   gestureEnabled: true,
                 }}
               >
-                {({ navigation }) => (
+                {({ navigation, route }) => (
                   <PantryItemFormScreen
                     mode="create"
                     onBack={() => navigation.goBack()}
+                    prefill={route.params?.prefill}
                     onSaved={(message) => {
                       handlePantryItemSaved(message);
                       navigation.popToTop();

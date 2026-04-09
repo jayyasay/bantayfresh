@@ -2,6 +2,7 @@ import {
   type ComponentProps,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 import {
@@ -20,10 +21,14 @@ import * as ImagePicker from "expo-image-picker";
 
 import {
   deletePantryItem,
+  findPantryItemByBarcode,
+  getPantryItemBarcode,
+  getPantryItemDisplayNotes,
   listPantryItems,
   type PantryItemRecord,
   updatePantryItem,
 } from "../../lib/pantry-items";
+import BarcodeScannerModal from "../components/BarcodeScannerModal";
 import {
   type ProfileRecord,
   updateProfile,
@@ -1245,7 +1250,11 @@ type DashboardScreenProps = {
   isProfileLoading: boolean;
   onLogout: () => void;
   onOpenBulkUpload: () => void;
-  onOpenCreate: () => void;
+  onOpenCreate: (prefill?: {
+    barcode?: string | null;
+    category?: string | null;
+    name?: string | null;
+  }) => void;
   onOpenEdit: (item: PantryItemRecord) => void;
   onOpenExpired: () => void;
   onProfileUpdated: (profile: ProfileRecord) => void;
@@ -1405,6 +1414,7 @@ export default function DashboardScreen({
   userEmail,
   userId,
 }: DashboardScreenProps) {
+  const quickScanHandledRef = useRef(false);
   const [search, setSearch] = useState("");
   const [selectedCategoryFilter, setSelectedCategoryFilter] = useState<string>("all");
   const [pantryItems, setPantryItems] = useState<PantryItemRecord[]>([]);
@@ -1416,6 +1426,8 @@ export default function DashboardScreen({
     null,
   );
   const [isUpdatingAvatar, setIsUpdatingAvatar] = useState(false);
+  const [showQuickScanModal, setShowQuickScanModal] = useState(false);
+  const [isResolvingScannedBarcode, setIsResolvingScannedBarcode] = useState(false);
   const [savingPreferenceKey, setSavingPreferenceKey] = useState<
     "one_day" | "three_days" | null
   >(null);
@@ -1701,12 +1713,87 @@ export default function DashboardScreen({
     onOpenCreate();
   }
 
+  function startQuickScanFlow() {
+    quickScanHandledRef.current = false;
+    setShowQuickScanModal(true);
+  }
+
   function startEditFlow(item: PantryItemRecord) {
     onOpenEdit(item);
   }
 
   function handleTabPress(nextTab: TabKey) {
     onTabChange(nextTab);
+  }
+
+  async function handleQuickBarcodeScanned(scannedBarcode: string) {
+    const normalizedBarcode = scannedBarcode.trim();
+
+    if (!normalizedBarcode || quickScanHandledRef.current) {
+      return;
+    }
+
+    quickScanHandledRef.current = true;
+    setShowQuickScanModal(false);
+    setIsResolvingScannedBarcode(true);
+
+    const existingItem =
+      pantryItems.find((item) => getPantryItemBarcode(item.notes) === normalizedBarcode) ??
+      null;
+
+    let resolvedName: string | null = existingItem?.name ?? null;
+
+    try {
+      const { data, error } = await findPantryItemByBarcode(normalizedBarcode);
+
+      if (error) {
+        throw error;
+      }
+
+      if (data?.product_name?.trim()) {
+        resolvedName = data.product_name.trim();
+      }
+    } catch {
+      if (!resolvedName) {
+        onShowToast("Barcode captured. Name lookup is unavailable right now.");
+      }
+    } finally {
+      setIsResolvingScannedBarcode(false);
+    }
+
+    const prefill = {
+      barcode: normalizedBarcode,
+      category: existingItem?.category ?? null,
+      name: resolvedName,
+    };
+
+    if (existingItem) {
+      Alert.alert(
+        "Barcode Already In Pantry",
+        `${existingItem.name} already exists in your pantry. Would you like to create a new item anyway or update the existing record?`,
+        [
+          {
+            style: "cancel",
+            text: "Cancel",
+          },
+          {
+            text: "Create New",
+            onPress: () => {
+              onOpenCreate(prefill);
+            },
+          },
+          {
+            text: "Update Existing",
+            onPress: () => {
+              onOpenEdit(existingItem);
+            },
+          },
+        ],
+      );
+      return;
+    }
+
+    onOpenCreate(prefill);
   }
 
   async function handleQuantityChange(item: PantryItemRecord, delta: number) {
@@ -2208,6 +2295,32 @@ export default function DashboardScreen({
                 </View>
               </View>
             </QuickActionButton>
+
+            <QuickActionButton
+              accessibilityLabel="Scan a product barcode"
+              backgroundColor={COLORS.surface}
+              borderColor={COLORS.pageLine}
+              borderWidth={1}
+              width="48%"
+              opacity={isResolvingScannedBarcode ? 0.72 : 1}
+              onPress={startQuickScanFlow}
+            >
+              <QuickActionBubble backgroundColor={COLORS.surfaceSoft}>
+                <Ionicons color={COLORS.deepGreen} name="scan-outline" size={24} />
+              </QuickActionBubble>
+              <View gap={6}>
+                <QuickActionLabel color={COLORS.textDark}>Barcode Scanner</QuickActionLabel>
+                <QuickActionCaption color={COLORS.textSoft}>
+                  {isResolvingScannedBarcode
+                    ? "Checking your pantry and product lookup…"
+                    : "Scan a code and jump into the right item flow"}
+                </QuickActionCaption>
+                <View alignItems="center" flexDirection="row" gap={6}>
+                  <QuickActionHint color={COLORS.deepGreen}>Scan</QuickActionHint>
+                  <Ionicons color={COLORS.deepGreen} name="arrow-forward" size={14} />
+                </View>
+              </View>
+            </QuickActionButton>
           </QuickActionsRow>
 
         </Section>
@@ -2400,8 +2513,10 @@ export default function DashboardScreen({
                       </QuantityButton>
                     </QuantityControl>
 
-                    {item.notes?.trim() ? (
-                      <InventoryMeta numberOfLines={2}>{item.notes.trim()}</InventoryMeta>
+                    {getPantryItemDisplayNotes(item.notes) ? (
+                      <InventoryMeta numberOfLines={2}>
+                        {getPantryItemDisplayNotes(item.notes)}
+                      </InventoryMeta>
                     ) : null}
                   </View>
 
@@ -2553,8 +2668,10 @@ export default function DashboardScreen({
                       </InventoryMeta>
                     </View>
 
-                    {item.notes?.trim() ? (
-                      <InventoryMeta numberOfLines={2}>{item.notes.trim()}</InventoryMeta>
+                    {getPantryItemDisplayNotes(item.notes) ? (
+                      <InventoryMeta numberOfLines={2}>
+                        {getPantryItemDisplayNotes(item.notes)}
+                      </InventoryMeta>
                     ) : null}
                   </View>
 
@@ -2830,6 +2947,14 @@ export default function DashboardScreen({
           <ToastText>{toastMessage}</ToastText>
         </ToastCard>
       ) : null}
+
+      <BarcodeScannerModal
+        visible={showQuickScanModal}
+        onClose={() => setShowQuickScanModal(false)}
+        onScanned={(result) => {
+          void handleQuickBarcodeScanned(result.data);
+        }}
+      />
 
       <Modal
         animationType="fade"

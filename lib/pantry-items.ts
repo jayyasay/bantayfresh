@@ -1,5 +1,7 @@
 import { supabase } from "./supabase";
 
+const BARCODE_NOTE_PATTERN = /(?:^|\n)\[barcode\]\s*(.+?)(?=\n|$)/i;
+
 export type PantryItemRecord = {
   id: string;
   user_id: string;
@@ -31,6 +33,54 @@ export type PantryItemPhotoUpload = {
   mimeType?: string | null;
   uri: string;
 };
+
+export type PantryItemSuggestion = {
+  name: string;
+  category: string | null;
+};
+
+export type BarcodeLookupRecord = {
+  barcode: string;
+  product_name: string;
+};
+
+export function getPantryItemBarcode(notes: string | null) {
+  const match = notes?.match(BARCODE_NOTE_PATTERN);
+  const barcode = match?.[1]?.trim();
+  return barcode ? barcode : null;
+}
+
+export function getPantryItemDisplayNotes(notes: string | null) {
+  if (!notes) {
+    return null;
+  }
+
+  const cleaned = notes
+    .replace(BARCODE_NOTE_PATTERN, "")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+
+  return cleaned.length > 0 ? cleaned : null;
+}
+
+export function composePantryItemNotes(
+  notes: string | null,
+  barcode: string | null,
+) {
+  const trimmedNotes = notes?.trim() || null;
+  const trimmedBarcode = barcode?.trim() || null;
+  const parts = [];
+
+  if (trimmedBarcode) {
+    parts.push(`[barcode] ${trimmedBarcode}`);
+  }
+
+  if (trimmedNotes) {
+    parts.push(trimmedNotes);
+  }
+
+  return parts.length > 0 ? parts.join("\n\n") : null;
+}
 
 const PANTRY_ITEM_COLUMNS =
   "id, user_id, name, category, quantity, unit, expiry_date, photo_url, notes, created_at, updated_at";
@@ -154,6 +204,52 @@ export async function updatePantryItem(
     .eq("id", itemId)
     .eq("user_id", userId)
     .select(PANTRY_ITEM_COLUMNS)
+    .single();
+}
+
+export async function searchPantryItemSuggestions(
+  userId: string,
+  query: string,
+) {
+  return requireSupabaseClient()
+    .from("pantry_items")
+    .select("name, category, updated_at")
+    .eq("user_id", userId)
+    .ilike("name", `%${query.trim()}%`)
+    .order("updated_at", { ascending: false })
+    .limit(10);
+}
+
+export async function findPantryItemByBarcode(barcode: string) {
+  const normalizedBarcode = barcode.trim();
+
+  return requireSupabaseClient()
+    .from("barcode_product_lookup")
+    .select("barcode, product_name")
+    .eq("barcode", normalizedBarcode)
+    .maybeSingle();
+}
+
+export async function upsertBarcodeProductLookup(
+  barcode: string,
+  productName: string,
+) {
+  const normalizedBarcode = barcode.trim();
+  const normalizedProductName = productName.trim();
+
+  return requireSupabaseClient()
+    .from("barcode_product_lookup")
+    .upsert(
+      {
+        barcode: normalizedBarcode,
+        last_seen_at: new Date().toISOString(),
+        product_name: normalizedProductName,
+      },
+      {
+        onConflict: "barcode",
+      },
+    )
+    .select("barcode, product_name")
     .single();
 }
 

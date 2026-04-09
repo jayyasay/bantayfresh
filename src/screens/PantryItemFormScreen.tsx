@@ -20,13 +20,21 @@ import DateTimePicker, {
 import * as ImagePicker from "expo-image-picker";
 
 import {
+  composePantryItemNotes,
   createPantryItem,
   deletePantryItem,
+  findPantryItemByBarcode,
+  getPantryItemBarcode,
+  getPantryItemDisplayNotes,
   type PantryItemPhotoUpload,
   type PantryItemRecord,
+  type PantryItemSuggestion,
+  searchPantryItemSuggestions,
+  upsertBarcodeProductLookup,
   updatePantryItem,
   uploadPantryItemPhoto,
 } from "../../lib/pantry-items";
+import BarcodeScannerModal from "../components/BarcodeScannerModal";
 import { COLORS } from "../theme/colors";
 
 type CategoryValue = "Fruits & Veggies" | "Fridge Items" | "Pantry";
@@ -229,6 +237,82 @@ const PhotoPreviewCard = styled(View, {
   gap: 10,
 });
 
+const ScannerButton = styled(Pressable, {
+  borderRadius: 22,
+  backgroundColor: COLORS.night,
+  paddingVertical: 16,
+  paddingHorizontal: 18,
+  flexDirection: "row",
+  alignItems: "center",
+  justifyContent: "center",
+  gap: 10,
+});
+
+const ScannerButtonText = styled(Text, {
+  color: COLORS.white,
+  fontSize: 15,
+  lineHeight: 19,
+  fontWeight: "800",
+});
+
+const BarcodeCard = styled(View, {
+  borderRadius: 22,
+  backgroundColor: "#EEF9F2",
+  borderWidth: 1,
+  borderColor: "#CFE8D8",
+  paddingTop: 14,
+  paddingRight: 14,
+  paddingBottom: 14,
+  paddingLeft: 14,
+  gap: 10,
+});
+
+const BarcodeLabel = styled(Text, {
+  color: COLORS.deepGreen,
+  fontSize: 12,
+  lineHeight: 16,
+  letterSpacing: 1.2,
+  textTransform: "uppercase",
+  fontWeight: "800",
+});
+
+const BarcodeValue = styled(Text, {
+  color: COLORS.textDark,
+  fontSize: 18,
+  lineHeight: 24,
+  fontWeight: "800",
+});
+
+const SuggestionsCard = styled(View, {
+  borderRadius: 20,
+  backgroundColor: COLORS.surface,
+  borderWidth: 1,
+  borderColor: COLORS.pageLine,
+  overflow: "hidden",
+});
+
+const SuggestionButton = styled(Pressable, {
+  paddingTop: 14,
+  paddingRight: 16,
+  paddingBottom: 14,
+  paddingLeft: 16,
+  gap: 4,
+  backgroundColor: COLORS.surface,
+});
+
+const SuggestionName = styled(Text, {
+  color: COLORS.textDark,
+  fontSize: 15,
+  lineHeight: 19,
+  fontWeight: "700",
+});
+
+const SuggestionMeta = styled(Text, {
+  color: COLORS.textSoft,
+  fontSize: 12,
+  lineHeight: 16,
+});
+
 const InlineNotice = styled(View, {
   borderRadius: 18,
   borderWidth: 1,
@@ -292,6 +376,11 @@ type PantryItemFormScreenProps = {
   mode: "create" | "edit";
   onBack: () => void;
   onDeleted?: (message: string) => void;
+  prefill?: {
+    barcode?: string | null;
+    category?: string | null;
+    name?: string | null;
+  };
   onSaved: (message: string) => void;
   userId: string;
 };
@@ -336,10 +425,14 @@ export default function PantryItemFormScreen({
   mode,
   onBack,
   onDeleted,
+  prefill,
   onSaved,
   userId,
 }: PantryItemFormScreenProps) {
   const scrollViewRef = useRef<ScrollView>(null);
+  const barcodeLookupCacheRef = useRef<Map<string, PantryItemSuggestion | null>>(
+    new Map(),
+  );
   const [itemName, setItemName] = useState("");
   const [selectedCategory, setSelectedCategory] = useState<CategoryValue>("Pantry");
   const [quantity, setQuantity] = useState("1");
@@ -347,11 +440,18 @@ export default function PantryItemFormScreen({
   const [photoUri, setPhotoUri] = useState<string | null>(null);
   const [pendingPhotoUpload, setPendingPhotoUpload] =
     useState<PantryItemPhotoUpload | null>(null);
+  const [barcodeValue, setBarcodeValue] = useState<string | null>(null);
   const [notes, setNotes] = useState("");
+  const [nameSuggestions, setNameSuggestions] = useState<PantryItemSuggestion[]>([]);
+  const [isLoadingSuggestions, setIsLoadingSuggestions] = useState(false);
+  const [isNameFieldFocused, setIsNameFieldFocused] = useState(false);
   const [showExpiryPicker, setShowExpiryPicker] = useState(false);
+  const [showBarcodeScanner, setShowBarcodeScanner] = useState(false);
   const [isPickingPhoto, setIsPickingPhoto] = useState(false);
+  const [isLookingUpBarcode, setIsLookingUpBarcode] = useState(false);
   const [isSavingItem, setIsSavingItem] = useState(false);
   const [isDeletingItem, setIsDeletingItem] = useState(false);
+  const [barcodeLookupMessage, setBarcodeLookupMessage] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   useEffect(() => {
@@ -370,9 +470,36 @@ export default function PantryItemFormScreen({
     setQuantity(String(initialItem.quantity));
     setExpiryDate(initialItem.expiry_date);
     setPhotoUri(initialItem.photo_url);
-    setNotes(initialItem.notes ?? "");
+    setBarcodeValue(getPantryItemBarcode(initialItem.notes));
+    setNotes(getPantryItemDisplayNotes(initialItem.notes) ?? "");
     setPendingPhotoUpload(null);
   }, [initialItem]);
+
+  useEffect(() => {
+    if (mode !== "create" || initialItem) {
+      return;
+    }
+
+    if (prefill?.name) {
+      setItemName(prefill.name);
+    }
+
+    if (
+      prefill?.category &&
+      CATEGORY_OPTIONS.some((category) => category.value === prefill.category)
+    ) {
+      setSelectedCategory(prefill.category as CategoryValue);
+    }
+
+    if (prefill?.barcode) {
+      setBarcodeValue(prefill.barcode);
+      setBarcodeLookupMessage(
+        prefill.name
+          ? `Matched existing product name: ${prefill.name}.`
+          : "Barcode captured. Add the rest of the item details to continue.",
+      );
+    }
+  }, [initialItem, mode, prefill]);
 
   useEffect(() => {
     if (Platform.OS === "android" && UIManager.setLayoutAnimationEnabledExperimental) {
@@ -390,6 +517,148 @@ export default function PantryItemFormScreen({
       });
     }, []),
   );
+
+  useEffect(() => {
+    const normalizedQuery = itemName.trim();
+
+    if (!isNameFieldFocused || normalizedQuery.length < 2) {
+      setNameSuggestions([]);
+      setIsLoadingSuggestions(false);
+      return;
+    }
+
+    let isMounted = true;
+    const timer = setTimeout(() => {
+      setIsLoadingSuggestions(true);
+
+      searchPantryItemSuggestions(userId, normalizedQuery)
+        .then(({ data, error }) => {
+          if (!isMounted) {
+            return;
+          }
+
+          if (error) {
+            throw error;
+          }
+
+          const dedupedSuggestions = (data ?? []).reduce<PantryItemSuggestion[]>(
+            (accumulator, item) => {
+              const normalizedName = item.name.trim().toLowerCase();
+              if (
+                accumulator.some(
+                  (existingItem) =>
+                    existingItem.name.trim().toLowerCase() === normalizedName,
+                )
+              ) {
+                return accumulator;
+              }
+
+              accumulator.push({
+                category: item.category,
+                name: item.name,
+              });
+
+              return accumulator;
+            },
+            [],
+          );
+
+          setNameSuggestions(dedupedSuggestions.slice(0, 5));
+        })
+        .catch(() => {
+          if (isMounted) {
+            setNameSuggestions([]);
+          }
+        })
+        .finally(() => {
+          if (isMounted) {
+            setIsLoadingSuggestions(false);
+          }
+        });
+    }, 280);
+
+    return () => {
+      isMounted = false;
+      clearTimeout(timer);
+    };
+  }, [isNameFieldFocused, itemName, userId]);
+
+  function applySuggestion(suggestion: PantryItemSuggestion) {
+    setItemName(suggestion.name);
+    setNameSuggestions([]);
+    setIsNameFieldFocused(false);
+
+    if (
+      suggestion.category &&
+      CATEGORY_OPTIONS.some((category) => category.value === suggestion.category)
+    ) {
+      setSelectedCategory(suggestion.category as CategoryValue);
+    }
+  }
+
+  async function handleBarcodeDetected(scannedBarcode: string) {
+    const normalizedBarcode = scannedBarcode.trim();
+    setBarcodeValue(normalizedBarcode);
+    setErrorMessage(null);
+
+    if (!normalizedBarcode) {
+      setBarcodeLookupMessage(null);
+      return;
+    }
+
+    const cachedMatch = barcodeLookupCacheRef.current.get(normalizedBarcode);
+    if (cachedMatch !== undefined) {
+      if (cachedMatch) {
+        setItemName(cachedMatch.name);
+        if (
+          cachedMatch.category &&
+          CATEGORY_OPTIONS.some((category) => category.value === cachedMatch.category)
+        ) {
+          setSelectedCategory(cachedMatch.category as CategoryValue);
+        }
+        setBarcodeLookupMessage(`Matched existing item: ${cachedMatch.name}.`);
+      } else {
+        setBarcodeLookupMessage("No existing item matched this barcode yet.");
+      }
+      return;
+    }
+
+    try {
+      setIsLookingUpBarcode(true);
+
+      const { data, error } = await findPantryItemByBarcode(normalizedBarcode);
+
+      if (error) {
+        throw error;
+      }
+
+      const matchedItem = data
+        ? {
+            category: null,
+            name: data.product_name,
+          }
+        : null;
+
+      barcodeLookupCacheRef.current.set(normalizedBarcode, matchedItem);
+
+      if (matchedItem) {
+        setItemName(matchedItem.name);
+        if (
+          matchedItem.category &&
+          CATEGORY_OPTIONS.some((category) => category.value === matchedItem.category)
+        ) {
+          setSelectedCategory(matchedItem.category as CategoryValue);
+        }
+        setBarcodeLookupMessage(`Matched existing item: ${matchedItem.name}.`);
+      } else {
+        setBarcodeLookupMessage("No existing item matched this barcode yet.");
+      }
+    } catch {
+      setBarcodeLookupMessage("Barcode captured. We couldn't verify an existing match right now.");
+    } finally {
+      setIsLookingUpBarcode(false);
+    }
+  }
 
   function handleExpiryChange(
     event: DateTimePickerEvent,
@@ -501,7 +770,7 @@ export default function PantryItemFormScreen({
         unit: null,
         expiry_date: expiryDate,
         photo_url: nextPhotoUrl,
-        notes: trimOptionalValue(notes),
+        notes: composePantryItemNotes(trimOptionalValue(notes), barcodeValue),
       };
 
       const result =
@@ -511,6 +780,17 @@ export default function PantryItemFormScreen({
 
       if (result.error) {
         throw result.error;
+      }
+
+      if (barcodeValue?.trim()) {
+        const { error: barcodeLookupError } = await upsertBarcodeProductLookup(
+          barcodeValue,
+          trimmedName,
+        );
+
+        if (barcodeLookupError) {
+          throw barcodeLookupError;
+        }
       }
 
       onSaved(
@@ -659,9 +939,46 @@ export default function PantryItemFormScreen({
                     spellCheck={false}
                     style={styles.formInput}
                     value={itemName}
+                    onBlur={() => {
+                      setTimeout(() => {
+                        setIsNameFieldFocused(false);
+                      }, 120);
+                    }}
                     onChangeText={setItemName}
+                    onFocus={() => setIsNameFieldFocused(true)}
                   />
                 </InputShell>
+
+                {isNameFieldFocused &&
+                (isLoadingSuggestions || nameSuggestions.length > 0) ? (
+                  <SuggestionsCard>
+                    {isLoadingSuggestions ? (
+                      <SuggestionButton disabled>
+                        <SuggestionName>Looking for similar items…</SuggestionName>
+                        <SuggestionMeta>
+                          Pulling recent matches from your pantry records.
+                        </SuggestionMeta>
+                      </SuggestionButton>
+                    ) : (
+                      nameSuggestions.map((suggestion, index) => (
+                        <View key={`${suggestion.name}-${suggestion.category ?? "none"}`}>
+                          <SuggestionButton
+                            accessibilityLabel={`Use ${suggestion.name} suggestion`}
+                            onPress={() => applySuggestion(suggestion)}
+                          >
+                            <SuggestionName>{suggestion.name}</SuggestionName>
+                            <SuggestionMeta>
+                              {suggestion.category || "Previously used item"}
+                            </SuggestionMeta>
+                          </SuggestionButton>
+                          {index < nameSuggestions.length - 1 ? (
+                            <View height={1} backgroundColor={COLORS.pageLine} />
+                          ) : null}
+                        </View>
+                      ))
+                    )}
+                  </SuggestionsCard>
+                ) : null}
               </View>
 
               <View gap={8}>
@@ -678,6 +995,64 @@ export default function PantryItemFormScreen({
                     onChangeText={setQuantity}
                   />
                 </InputShell>
+              </View>
+
+              <View gap={8}>
+                <FormLabel>Barcode</FormLabel>
+                <ScannerButton
+                  accessibilityLabel={
+                    barcodeValue ? "Scan barcode again" : "Scan item barcode"
+                  }
+                  onPress={() => setShowBarcodeScanner(true)}
+                >
+                  <Ionicons color={COLORS.white} name="scan-outline" size={18} />
+                  <ScannerButtonText>
+                    {barcodeValue ? "Scan Again" : "Scan Barcode"}
+                  </ScannerButtonText>
+                </ScannerButton>
+
+                {barcodeValue ? (
+                  <BarcodeCard>
+                    <View gap={4}>
+                      <BarcodeLabel>Detected code</BarcodeLabel>
+                      <BarcodeValue>{barcodeValue}</BarcodeValue>
+                    </View>
+
+                    {isLookingUpBarcode || barcodeLookupMessage ? (
+                      <SuggestionMeta color={isLookingUpBarcode ? COLORS.textSoft : COLORS.deepGreen}>
+                        {isLookingUpBarcode
+                          ? "Checking your pantry for an existing match…"
+                          : barcodeLookupMessage}
+                      </SuggestionMeta>
+                    ) : null}
+
+                    <View flexDirection="row" gap={10}>
+                      <SecondaryButton
+                        accessibilityLabel="Rescan barcode"
+                        flex={1}
+                        onPress={() => setShowBarcodeScanner(true)}
+                      >
+                        <SecondaryButtonText>Rescan</SecondaryButtonText>
+                      </SecondaryButton>
+
+                      <SecondaryButton
+                        accessibilityLabel="Clear scanned barcode"
+                        flex={1}
+                        onPress={() => setBarcodeValue(null)}
+                      >
+                        <SecondaryButtonText>Clear</SecondaryButtonText>
+                      </SecondaryButton>
+                    </View>
+                  </BarcodeCard>
+                ) : (
+                  <InlineNotice backgroundColor="#F5FBF7" borderColor="#DCEDE2">
+                    <NoticeTitle color={COLORS.deepGreen}>Camera-powered scanning</NoticeTitle>
+                    <NoticeBody color={COLORS.textSoft}>
+                      Open the scanner and point the back camera at the product barcode. The app
+                      captures it automatically with no manual code entry.
+                    </NoticeBody>
+                  </InlineNotice>
+                )}
               </View>
 
               <View gap={8}>
@@ -815,6 +1190,14 @@ export default function PantryItemFormScreen({
           </Section>
         </ScrollView>
       </KeyboardAvoidingView>
+
+      <BarcodeScannerModal
+        visible={showBarcodeScanner}
+        onClose={() => setShowBarcodeScanner(false)}
+        onScanned={(result) => {
+          void handleBarcodeDetected(result.data);
+        }}
+      />
     </ScreenShell>
   );
 }

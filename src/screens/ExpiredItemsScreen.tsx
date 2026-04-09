@@ -11,6 +11,7 @@ import { Text, View, styled } from "@tamagui/core";
 
 import {
   deletePantryItem,
+  getPantryItemDisplayNotes,
   listPantryItems,
   type PantryItemRecord,
 } from "../../lib/pantry-items";
@@ -505,9 +506,8 @@ export default function ExpiredItemsScreen({
                         </View>
 
                         <InventoryMeta numberOfLines={2}>
-                          {item.notes?.trim()
-                            ? item.notes.trim()
-                            : `Expired on ${formatExpiryCopy(item.expiry_date)}.`}
+                          {getPantryItemDisplayNotes(item.notes) ??
+                            `Expired on ${formatExpiryCopy(item.expiry_date)}.`}
                         </InventoryMeta>
                       </View>
 

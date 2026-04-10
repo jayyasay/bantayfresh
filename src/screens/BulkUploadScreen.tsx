@@ -15,8 +15,15 @@ import * as XLSX from "xlsx";
 
 import {
   bulkCreatePantryItems,
+  composePantryItemNotes,
   type PantryItemInsert,
 } from "../../lib/pantry-items";
+import {
+  INVENTORY_SPACE_CONFIG,
+  INVENTORY_SPACE_PALETTES,
+  normalizeInventorySpace,
+  type InventorySpaceKey,
+} from "../../lib/inventory-spaces";
 import { COLORS } from "../theme/colors";
 
 const ScreenShell = styled(View, {
@@ -143,6 +150,7 @@ const NoticeBody = styled(Text, {
 });
 
 type BulkUploadScreenProps = {
+  inventorySpace: InventorySpaceKey;
   onBack: () => void;
   onImported: (message: string) => void;
   userId: string;
@@ -153,12 +161,15 @@ type ParsedBulkRow = PantryItemInsert & {
 };
 
 const EXPECTED_FIELDS = [
+  "barcode",
   "category",
   "name",
   "quantity",
   "expiry_date",
   "notes",
   "photo_url",
+  "space",
+  "stock_status",
 ];
 
 function normalizeHeader(header: string) {
@@ -210,7 +221,26 @@ function parseExpiryDate(value: unknown) {
   return parsed.toISOString().slice(0, 10);
 }
 
-function parseWorkbookRows(workbook: XLSX.WorkBook) {
+function parseStockStatus(value: unknown) {
+  const normalized = formatCellValue(value).toLowerCase();
+  if (
+    normalized === "low_stock" ||
+    normalized === "low stock" ||
+    normalized === "low" ||
+    normalized === "yes" ||
+    normalized === "true" ||
+    normalized === "1"
+  ) {
+    return "low_stock" as const;
+  }
+
+  return "in_stock" as const;
+}
+
+function parseWorkbookRows(
+  workbook: XLSX.WorkBook,
+  inventorySpace: InventorySpaceKey,
+) {
   const firstSheetName = workbook.SheetNames[0];
   const firstSheet = workbook.Sheets[firstSheetName];
   const rawRows = XLSX.utils.sheet_to_json<Record<string, unknown>>(firstSheet, {
@@ -234,6 +264,13 @@ function parseWorkbookRows(workbook: XLSX.WorkBook) {
     const expiryDate = parseExpiryDate(
       row.expiry_date || row.expiry || row.expiration_date,
     );
+    const space = normalizeInventorySpace(
+      formatCellValue(row.space) || inventorySpace,
+    );
+    const barcode = formatCellValue(row.barcode) || null;
+    const stockStatus = parseStockStatus(
+      row.stock_status || row.stock || row.low_stock || row.is_low_stock,
+    );
     const notes = formatCellValue(row.notes) || null;
     const photoUrl = formatCellValue(row.photo_url) || null;
 
@@ -254,6 +291,7 @@ function parseWorkbookRows(workbook: XLSX.WorkBook) {
     }
 
     parsedRows.push({
+      barcode,
       category,
       expiry_date: expiryDate,
       name,
@@ -261,6 +299,8 @@ function parseWorkbookRows(workbook: XLSX.WorkBook) {
       photo_url: photoUrl,
       previewKey: `${rowLabel}-${name}`,
       quantity,
+      space: space ?? inventorySpace,
+      stock_status: stockStatus,
       unit: null,
     });
   });
@@ -269,6 +309,7 @@ function parseWorkbookRows(workbook: XLSX.WorkBook) {
 }
 
 export default function BulkUploadScreen({
+  inventorySpace,
   onBack,
   onImported,
   userId,
@@ -280,6 +321,7 @@ export default function BulkUploadScreen({
   const [isPickingFile, setIsPickingFile] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const activeSpacePalette = INVENTORY_SPACE_PALETTES[inventorySpace];
 
   async function handleChooseFile() {
     try {
@@ -305,7 +347,7 @@ export default function BulkUploadScreen({
         encoding: FileSystem.EncodingType.Base64,
       });
       const workbook = XLSX.read(base64, { type: "base64" });
-      const parsed = parseWorkbookRows(workbook);
+      const parsed = parseWorkbookRows(workbook, inventorySpace);
 
       setFileName(asset.name ?? "Selected spreadsheet");
       setIssues(parsed.issues);
@@ -334,7 +376,12 @@ export default function BulkUploadScreen({
       setIsImporting(true);
       setErrorMessage(null);
 
-      const payload: PantryItemInsert[] = parsedRows.map(({ previewKey: _previewKey, ...item }) => item);
+      const payload: PantryItemInsert[] = parsedRows.map(
+        ({ previewKey: _previewKey, ...item }) => ({
+          ...item,
+          notes: composePantryItemNotes(item.notes, null),
+        }),
+      );
       const { data, error } = await bulkCreatePantryItems(userId, payload);
 
       if (error) {
@@ -388,10 +435,10 @@ export default function BulkUploadScreen({
                 </Text>
               </BackButton>
 
-              <SectionTitle>Bulk Upload Inventory</SectionTitle>
+              <SectionTitle>{INVENTORY_SPACE_CONFIG[inventorySpace].label} Bulk Upload</SectionTitle>
               <SectionBody>
                 Import an `.xls`, `.xlsx`, or `.csv` file and turn spreadsheet rows
-                into pantry items in one go.
+                into {INVENTORY_SPACE_CONFIG[inventorySpace].label.toLowerCase()} items in one go.
               </SectionBody>
             </Header>
 
@@ -495,12 +542,13 @@ export default function BulkUploadScreen({
             ) : null}
 
             <PrimaryButton
+              backgroundColor={activeSpacePalette.actionBackground}
               marginTop={20}
               opacity={parsedRows.length === 0 || issues.length > 0 || isImporting ? 0.6 : 1}
               onPress={() => void handleImport()}
             >
-              <Ionicons color={COLORS.white} name="cloud-upload-outline" size={18} />
-              <ButtonText color={COLORS.white}>
+              <Ionicons color={activeSpacePalette.actionText} name="cloud-upload-outline" size={18} />
+              <ButtonText color={activeSpacePalette.actionText}>
                 {isImporting ? "Importing…" : "Import Items"}
               </ButtonText>
             </PrimaryButton>

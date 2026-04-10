@@ -12,9 +12,15 @@ import { Text, View, styled } from "@tamagui/core";
 import {
   deletePantryItem,
   getPantryItemDisplayNotes,
+  getPantryItemInventorySpace,
   listPantryItems,
   type PantryItemRecord,
 } from "../../lib/pantry-items";
+import {
+  INVENTORY_SPACE_CONFIG,
+  INVENTORY_SPACE_PALETTES,
+  type InventorySpaceKey,
+} from "../../lib/inventory-spaces";
 import { COLORS } from "../theme/colors";
 
 const ScreenShell = styled(View, {
@@ -234,6 +240,7 @@ const SkeletonBlock = styled(View, {
 });
 
 type ExpiredItemsScreenProps = {
+  inventorySpace: InventorySpaceKey;
   onBack: () => void;
   onOpenEdit: (item: PantryItemRecord) => void;
   onItemsChanged: (message: string) => void;
@@ -278,6 +285,7 @@ function formatExpiryCopy(expiryDate: string | null) {
 }
 
 export default function ExpiredItemsScreen({
+  inventorySpace,
   onBack,
   onItemsChanged,
   onOpenEdit,
@@ -289,6 +297,7 @@ export default function ExpiredItemsScreen({
   const [isItemsLoading, setIsItemsLoading] = useState(true);
   const [inventoryError, setInventoryError] = useState<string | null>(null);
   const [deletingItemId, setDeletingItemId] = useState<string | null>(null);
+  const activeSpacePalette = INVENTORY_SPACE_PALETTES[inventorySpace];
 
   useEffect(() => {
     let isMounted = true;
@@ -338,6 +347,10 @@ export default function ExpiredItemsScreen({
     today.setHours(0, 0, 0, 0);
 
     return pantryItems.filter((item) => {
+      if (getPantryItemInventorySpace(item) !== inventorySpace) {
+        return false;
+      }
+
       if (!item.expiry_date) {
         return false;
       }
@@ -349,7 +362,7 @@ export default function ExpiredItemsScreen({
 
       return parsedExpiry < today;
     });
-  }, [pantryItems]);
+  }, [inventorySpace, pantryItems]);
 
   function confirmDeleteItem(item: PantryItemRecord) {
     Alert.alert(
@@ -419,7 +432,7 @@ export default function ExpiredItemsScreen({
             </BackButton>
 
             <View gap={8}>
-              <SectionTitle>Expired Items</SectionTitle>
+              <SectionTitle>{INVENTORY_SPACE_CONFIG[inventorySpace].label} Expired Items</SectionTitle>
               <SectionBody>
                 Review products that have already passed their expiry date, then
                 either delete them or open the full item details.
@@ -428,7 +441,7 @@ export default function ExpiredItemsScreen({
           </ScreenHeader>
 
           <SummaryCard>
-            <SummaryEyebrow>Expired Inventory</SummaryEyebrow>
+            <SummaryEyebrow>{INVENTORY_SPACE_CONFIG[inventorySpace].shortLabel} Queue</SummaryEyebrow>
             <SummaryValue>
               {expiredItems.length} {expiredItems.length === 1 ? "Item" : "Items"}
             </SummaryValue>
@@ -466,7 +479,7 @@ export default function ExpiredItemsScreen({
             <EmptyCard>
               <SectionTitle fontSize={20} lineHeight={24}>No Expired Items</SectionTitle>
               <SectionBody>
-                Everything currently in your pantry is still active or inside the
+                Everything in this inventory space is still active or inside the
                 upcoming expiry window.
               </SectionBody>
             </EmptyCard>
@@ -498,7 +511,10 @@ export default function ExpiredItemsScreen({
 
                       <View gap={8} flex={1} minWidth={0}>
                         <View gap={4}>
-                          <Eyebrow>{item.category || "Uncategorized"}</Eyebrow>
+                          <Eyebrow color={activeSpacePalette.accent}>
+                            {item.category || "Uncategorized"}
+                          </Eyebrow>
+
                           <InventoryName>{item.name}</InventoryName>
                           <InventoryMeta>
                             Qty {item.quantity} · Expired {expiredDays ?? 0}d ago
@@ -506,7 +522,7 @@ export default function ExpiredItemsScreen({
                         </View>
 
                         <InventoryMeta numberOfLines={2}>
-                          {getPantryItemDisplayNotes(item.notes) ??
+                          {getPantryItemDisplayNotes(item) ??
                             `Expired on ${formatExpiryCopy(item.expiry_date)}.`}
                         </InventoryMeta>
                       </View>
@@ -528,7 +544,7 @@ export default function ExpiredItemsScreen({
                           </DeleteChipText>
                         </DeleteChip>
 
-                        <InventoryMeta color={COLORS.deepGreen}>Open →</InventoryMeta>
+                        <InventoryMeta color={activeSpacePalette.accent}>Open →</InventoryMeta>
                       </InventoryActionRow>
                     </InventoryRow>
                   </InventoryCard>

@@ -1,4 +1,11 @@
-import { type ComponentProps, useCallback, useEffect, useRef, useState } from "react";
+import {
+  type ComponentProps,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   Alert,
   Image,
@@ -9,6 +16,8 @@ import {
   ScrollView,
   StyleSheet,
   TextInput,
+  type NativeScrollEvent,
+  type NativeSyntheticEvent,
   UIManager,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
@@ -26,14 +35,22 @@ import {
   findPantryItemByBarcode,
   getPantryItemBarcode,
   getPantryItemDisplayNotes,
+  getPantryItemInventorySpace,
+  getPantryItemIsLowStock,
   type PantryItemPhotoUpload,
   type PantryItemRecord,
   type PantryItemSuggestion,
+  type PantryStockStatus,
   searchPantryItemSuggestions,
   upsertBarcodeProductLookup,
   updatePantryItem,
   uploadPantryItemPhoto,
 } from "../../lib/pantry-items";
+import {
+  INVENTORY_SPACE_OPTIONS,
+  INVENTORY_SPACE_PALETTES,
+  type InventorySpaceKey,
+} from "../../lib/inventory-spaces";
 import BarcodeScannerModal from "../components/BarcodeScannerModal";
 import { COLORS } from "../theme/colors";
 
@@ -123,6 +140,33 @@ const SectionBody = styled(Text, {
 const FormSection = styled(View, {
   marginTop: 22,
   gap: 14,
+});
+
+const SegmentWrap = styled(View, {
+  flexDirection: "row",
+  backgroundColor: COLORS.surface,
+  borderRadius: 24,
+  borderWidth: 1,
+  borderColor: COLORS.pageLine,
+  padding: 6,
+  gap: 6,
+});
+
+const SegmentButton = styled(Pressable, {
+  flex: 1,
+  minHeight: 54,
+  borderRadius: 18,
+  alignItems: "center",
+  justifyContent: "center",
+  paddingVertical: 10,
+  paddingHorizontal: 10,
+});
+
+const SegmentLabel = styled(Text, {
+  fontSize: 14,
+  lineHeight: 18,
+  fontWeight: "800",
+  textAlign: "center",
 });
 
 const FormLabel = styled(Text, {
@@ -371,6 +415,42 @@ const DeleteButtonText = styled(Text, {
   fontWeight: "800",
 });
 
+const StickySaveBar = styled(View, {
+  position: "absolute",
+  left: 20,
+  right: 20,
+  bottom: 14,
+  borderRadius: 24,
+  backgroundColor: "rgba(255,255,255,0.96)",
+  borderWidth: 1,
+  borderColor: COLORS.pageLine,
+  paddingTop: 10,
+  paddingRight: 10,
+  paddingBottom: 10,
+  paddingLeft: 10,
+  shadowColor: COLORS.shadow,
+  shadowOpacity: 0.14,
+  shadowRadius: 18,
+  shadowOffset: { width: 0, height: 10 },
+});
+
+const StickySaveButton = styled(Pressable, {
+  borderRadius: 18,
+  minHeight: 54,
+  backgroundColor: COLORS.night,
+  alignItems: "center",
+  justifyContent: "center",
+  paddingVertical: 14,
+  paddingHorizontal: 16,
+});
+
+const StickySaveText = styled(Text, {
+  color: COLORS.white,
+  fontSize: 16,
+  lineHeight: 20,
+  fontWeight: "800",
+});
+
 type PantryItemFormScreenProps = {
   initialItem?: PantryItemRecord | null;
   mode: "create" | "edit";
@@ -379,6 +459,7 @@ type PantryItemFormScreenProps = {
   prefill?: {
     barcode?: string | null;
     category?: string | null;
+    inventorySpace?: InventorySpaceKey | null;
     name?: string | null;
   };
   onSaved: (message: string) => void;
@@ -433,7 +514,11 @@ export default function PantryItemFormScreen({
   const barcodeLookupCacheRef = useRef<Map<string, PantryItemSuggestion | null>>(
     new Map(),
   );
+  const [scrollY, setScrollY] = useState(0);
+  const [scrollViewHeight, setScrollViewHeight] = useState(0);
+  const [contentHeight, setContentHeight] = useState(0);
   const [itemName, setItemName] = useState("");
+  const [inventorySpace, setInventorySpace] = useState<InventorySpaceKey>("kitchen");
   const [selectedCategory, setSelectedCategory] = useState<CategoryValue>("Pantry");
   const [quantity, setQuantity] = useState("1");
   const [expiryDate, setExpiryDate] = useState<string | null>(null);
@@ -441,6 +526,7 @@ export default function PantryItemFormScreen({
   const [pendingPhotoUpload, setPendingPhotoUpload] =
     useState<PantryItemPhotoUpload | null>(null);
   const [barcodeValue, setBarcodeValue] = useState<string | null>(null);
+  const [isLowStock, setIsLowStock] = useState(false);
   const [notes, setNotes] = useState("");
   const [nameSuggestions, setNameSuggestions] = useState<PantryItemSuggestion[]>([]);
   const [isLoadingSuggestions, setIsLoadingSuggestions] = useState(false);
@@ -453,6 +539,61 @@ export default function PantryItemFormScreen({
   const [isDeletingItem, setIsDeletingItem] = useState(false);
   const [barcodeLookupMessage, setBarcodeLookupMessage] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const activeSpacePalette = INVENTORY_SPACE_PALETTES[inventorySpace];
+  const initialItemSnapshot = useMemo(() => {
+    if (!initialItem) {
+      return null;
+    }
+
+    return {
+      barcode: getPantryItemBarcode(initialItem) ?? "",
+      category: initialItem.category,
+      expiryDate: initialItem.expiry_date ?? "",
+      inventorySpace: getPantryItemInventorySpace(initialItem),
+      isLowStock: getPantryItemIsLowStock(initialItem),
+      itemName: initialItem.name,
+      notes: getPantryItemDisplayNotes(initialItem) ?? "",
+      photoUri: initialItem.photo_url ?? "",
+      quantity: String(initialItem.quantity),
+    };
+  }, [initialItem]);
+  const hasUnsavedChanges = useMemo(() => {
+    if (mode !== "edit" || !initialItemSnapshot) {
+      return false;
+    }
+
+    return (
+      itemName.trim() !== initialItemSnapshot.itemName.trim() ||
+      inventorySpace !== initialItemSnapshot.inventorySpace ||
+      selectedCategory !== initialItemSnapshot.category ||
+      quantity.trim() !== initialItemSnapshot.quantity ||
+      (expiryDate ?? "") !== initialItemSnapshot.expiryDate ||
+      (photoUri ?? "") !== initialItemSnapshot.photoUri ||
+      (barcodeValue ?? "") !== initialItemSnapshot.barcode ||
+      (trimOptionalValue(notes) ?? "") !== initialItemSnapshot.notes ||
+      isLowStock !== initialItemSnapshot.isLowStock ||
+      pendingPhotoUpload !== null
+    );
+  }, [
+    barcodeValue,
+    expiryDate,
+    initialItemSnapshot,
+    inventorySpace,
+    isLowStock,
+    itemName,
+    mode,
+    notes,
+    pendingPhotoUpload,
+    photoUri,
+    quantity,
+    selectedCategory,
+  ]);
+  const isStickySaveVisible =
+    mode === "edit" &&
+    hasUnsavedChanges &&
+    contentHeight > 0 &&
+    scrollViewHeight > 0 &&
+    scrollY + scrollViewHeight < contentHeight - 220;
 
   useEffect(() => {
     if (!initialItem) {
@@ -466,12 +607,14 @@ export default function PantryItemFormScreen({
       : "Pantry";
 
     setItemName(initialItem.name);
+    setInventorySpace(getPantryItemInventorySpace(initialItem));
     setSelectedCategory(nextCategory);
     setQuantity(String(initialItem.quantity));
     setExpiryDate(initialItem.expiry_date);
     setPhotoUri(initialItem.photo_url);
-    setBarcodeValue(getPantryItemBarcode(initialItem.notes));
-    setNotes(getPantryItemDisplayNotes(initialItem.notes) ?? "");
+    setBarcodeValue(getPantryItemBarcode(initialItem));
+    setIsLowStock(getPantryItemIsLowStock(initialItem));
+    setNotes(getPantryItemDisplayNotes(initialItem) ?? "");
     setPendingPhotoUpload(null);
   }, [initialItem]);
 
@@ -482,6 +625,13 @@ export default function PantryItemFormScreen({
 
     if (prefill?.name) {
       setItemName(prefill.name);
+    }
+
+    if (
+      prefill?.inventorySpace &&
+      INVENTORY_SPACE_OPTIONS.some((option) => option.key === prefill.inventorySpace)
+    ) {
+      setInventorySpace(prefill.inventorySpace);
     }
 
     if (
@@ -764,13 +914,16 @@ export default function PantryItemFormScreen({
       }
 
       const payload = {
+        barcode: barcodeValue?.trim() || null,
         name: trimmedName,
         category: selectedCategory,
         quantity: parsedQuantity,
         unit: null,
         expiry_date: expiryDate,
         photo_url: nextPhotoUrl,
-        notes: composePantryItemNotes(trimOptionalValue(notes), barcodeValue),
+        space: inventorySpace,
+        stock_status: (isLowStock ? "low_stock" : "in_stock") as PantryStockStatus,
+        notes: composePantryItemNotes(trimOptionalValue(notes), null),
       };
 
       const result =
@@ -864,9 +1017,22 @@ export default function PantryItemFormScreen({
       >
         <ScrollView
           ref={scrollViewRef}
-          contentContainerStyle={styles.scrollContent}
+          contentContainerStyle={[
+            styles.scrollContent,
+            isStickySaveVisible ? styles.scrollContentWithStickySave : null,
+          ]}
           keyboardDismissMode="on-drag"
           keyboardShouldPersistTaps="handled"
+          onContentSizeChange={(_, height) => {
+            setContentHeight(height);
+          }}
+          onLayout={(event) => {
+            setScrollViewHeight(event.nativeEvent.layout.height);
+          }}
+          onScroll={(event: NativeSyntheticEvent<NativeScrollEvent>) => {
+            setScrollY(event.nativeEvent.contentOffset.y);
+          }}
+          scrollEventThrottle={16}
           showsVerticalScrollIndicator={false}
         >
           <Section>
@@ -889,6 +1055,44 @@ export default function PantryItemFormScreen({
             </DashboardHeader>
 
             <FormSection>
+              <View gap={8}>
+                <FormLabel>Inventory Space</FormLabel>
+                <SegmentWrap>
+                  {INVENTORY_SPACE_OPTIONS.map((space) => {
+                    const active = inventorySpace === space.key;
+
+                    return (
+                      <SegmentButton
+                        key={space.key}
+                        accessibilityLabel={`Select ${space.label} inventory space`}
+                        backgroundColor={
+                          active
+                            ? INVENTORY_SPACE_PALETTES[space.key].tabActiveBackground
+                            : "transparent"
+                        }
+                        borderColor={
+                          active
+                            ? INVENTORY_SPACE_PALETTES[space.key].accentSoftBorder
+                            : "transparent"
+                        }
+                        borderWidth={active ? 1 : 0}
+                        onPress={() => setInventorySpace(space.key)}
+                      >
+                        <SegmentLabel
+                          color={
+                            active
+                              ? INVENTORY_SPACE_PALETTES[space.key].tabActiveText
+                              : COLORS.textDark
+                          }
+                        >
+                          {space.shortLabel}
+                        </SegmentLabel>
+                      </SegmentButton>
+                    );
+                  })}
+                </SegmentWrap>
+              </View>
+
               <View gap={10}>
                 <FormLabel>Category</FormLabel>
                 <CategoryGrid>
@@ -900,19 +1104,21 @@ export default function PantryItemFormScreen({
                         key={category.value}
                         accessibilityLabel={`Select ${category.title}`}
                         backgroundColor={selected ? category.selectedCardColor : category.cardColor}
-                        borderColor={selected ? COLORS.deepGreen : "transparent"}
+                        borderColor={selected ? activeSpacePalette.accent : "transparent"}
                         onPress={() => {
                           LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
                           setSelectedCategory(category.value);
                         }}
                       >
                         <CategoryGlyphWrap
-                          backgroundColor={selected ? "rgba(255,255,255,0.9)" : category.accent}
-                          borderWidth={selected ? 1 : 0}
-                          borderColor={selected ? "rgba(11,123,68,0.25)" : "transparent"}
+                          backgroundColor={
+                            selected ? activeSpacePalette.accent : category.accent
+                          }
+                          borderWidth={0}
+                          borderColor="transparent"
                         >
                           <Ionicons
-                            color={selected ? COLORS.night : COLORS.deepGreen}
+                            color={selected ? COLORS.white : activeSpacePalette.accent}
                             name={category.icon}
                             size={24}
                           />
@@ -998,14 +1204,42 @@ export default function PantryItemFormScreen({
               </View>
 
               <View gap={8}>
+                <FormLabel>Stock Status</FormLabel>
+                <SegmentWrap>
+                  <SegmentButton
+                    accessibilityLabel="Mark item as in stock"
+                    backgroundColor={!isLowStock ? "#E8FAF0" : "transparent"}
+                    borderColor={!isLowStock ? "#BEE7CD" : "transparent"}
+                    borderWidth={!isLowStock ? 1 : 0}
+                    onPress={() => setIsLowStock(false)}
+                  >
+                    <SegmentLabel color={!isLowStock ? COLORS.deepGreen : COLORS.textDark}>
+                      In Stock
+                    </SegmentLabel>
+                  </SegmentButton>
+
+                  <SegmentButton
+                    accessibilityLabel="Mark item as low stock"
+                    backgroundColor={isLowStock ? "#FFE7DF" : "transparent"}
+                    onPress={() => setIsLowStock(true)}
+                  >
+                    <SegmentLabel color={isLowStock ? "#B34242" : COLORS.textDark}>
+                      Low Stock
+                    </SegmentLabel>
+                  </SegmentButton>
+                </SegmentWrap>
+              </View>
+
+              <View gap={8}>
                 <FormLabel>Barcode</FormLabel>
                 <ScannerButton
                   accessibilityLabel={
                     barcodeValue ? "Scan barcode again" : "Scan item barcode"
                   }
+                  backgroundColor={activeSpacePalette.actionBackground}
                   onPress={() => setShowBarcodeScanner(true)}
                 >
-                  <Ionicons color={COLORS.white} name="scan-outline" size={18} />
+                  <Ionicons color={activeSpacePalette.actionText} name="scan-outline" size={18} />
                   <ScannerButtonText>
                     {barcodeValue ? "Scan Again" : "Scan Barcode"}
                   </ScannerButtonText>
@@ -1163,10 +1397,11 @@ export default function PantryItemFormScreen({
 
               <SubmitButton
                 accessibilityLabel={mode === "edit" ? "Save pantry item changes" : "Create item"}
+                backgroundColor={activeSpacePalette.actionBackground}
                 opacity={isSavingItem ? 0.7 : 1}
                 onPress={handleSave}
               >
-                <SubmitButtonText>
+                <SubmitButtonText color={activeSpacePalette.actionText}>
                   {isSavingItem
                     ? "Saving Item…"
                     : mode === "edit"
@@ -1189,6 +1424,20 @@ export default function PantryItemFormScreen({
             </FormSection>
           </Section>
         </ScrollView>
+
+        {isStickySaveVisible ? (
+          <StickySaveBar pointerEvents="box-none">
+            <StickySaveButton
+              accessibilityLabel={mode === "edit" ? "Save pantry item changes" : "Create item"}
+              opacity={isSavingItem ? 0.72 : 1}
+              onPress={handleSave}
+            >
+              <StickySaveText>
+                {isSavingItem ? "Saving Item…" : mode === "edit" ? "Save Changes" : "Create Item"}
+              </StickySaveText>
+            </StickySaveButton>
+          </StickySaveBar>
+        ) : null}
       </KeyboardAvoidingView>
 
       <BarcodeScannerModal
@@ -1227,5 +1476,8 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     paddingBottom: 48,
+  },
+  scrollContentWithStickySave: {
+    paddingBottom: 138,
   },
 });

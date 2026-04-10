@@ -6,7 +6,9 @@ import {
   useState,
 } from "react";
 import {
+  ActivityIndicator,
   Alert,
+  FlatList,
   Image,
   Modal,
   Pressable,
@@ -24,10 +26,18 @@ import {
   findPantryItemByBarcode,
   getPantryItemBarcode,
   getPantryItemDisplayNotes,
+  getPantryItemInventorySpace,
+  getPantryItemIsLowStock,
   listPantryItems,
   type PantryItemRecord,
   updatePantryItem,
 } from "../../lib/pantry-items";
+import {
+  INVENTORY_SPACE_CONFIG,
+  INVENTORY_SPACE_OPTIONS,
+  INVENTORY_SPACE_PALETTES,
+  type InventorySpaceKey,
+} from "../../lib/inventory-spaces";
 import BarcodeScannerModal from "../components/BarcodeScannerModal";
 import {
   type ProfileRecord,
@@ -36,7 +46,7 @@ import {
 } from "../../lib/profiles";
 import { COLORS } from "../theme/colors";
 
-export type TabKey = "home" | "inventory" | "alerts" | "profile";
+export type TabKey = "home" | "inventory" | "low_stock" | "alerts" | "profile";
 type IoniconName = ComponentProps<typeof Ionicons>["name"];
 
 const Eyebrow = styled(Text, {
@@ -72,6 +82,35 @@ const HeaderActionRow = styled(View, {
   flexDirection: "row",
   alignItems: "center",
   gap: 10,
+});
+
+const SpaceSwitcher = styled(View, {
+  flexDirection: "row",
+  marginTop: 16,
+  gap: 10,
+});
+
+const SpaceTab = styled(Pressable, {
+  flex: 1,
+  minHeight: 68,
+  borderRadius: 22,
+  borderWidth: 1,
+  paddingTop: 12,
+  paddingRight: 12,
+  paddingBottom: 12,
+  paddingLeft: 12,
+  justifyContent: "space-between",
+});
+
+const SpaceTabLabel = styled(Text, {
+  fontSize: 15,
+  lineHeight: 18,
+  fontWeight: "800",
+});
+
+const SpaceTabMeta = styled(Text, {
+  fontSize: 11,
+  lineHeight: 14,
 });
 
 const GreetingTitle = styled(Text, {
@@ -302,6 +341,21 @@ const ExpiryBannerTitle = styled(Text, {
   fontWeight: "800",
 });
 
+const StatusToggleChip = styled(Pressable, {
+  borderRadius: 999,
+  borderWidth: 1,
+  paddingVertical: 8,
+  paddingHorizontal: 12,
+  alignItems: "center",
+  justifyContent: "center",
+});
+
+const StatusToggleChipText = styled(Text, {
+  fontSize: 12,
+  lineHeight: 16,
+  fontWeight: "800",
+});
+
 const ExpiryBannerBody = styled(Text, {
   color: "#7A3737",
   fontSize: 14,
@@ -322,6 +376,40 @@ const ExpiryBannerButtonText = styled(Text, {
   fontSize: 13,
   lineHeight: 16,
   fontWeight: "800",
+});
+
+const LowStockSummaryCard = styled(View, {
+  marginTop: 18,
+  borderRadius: 26,
+  backgroundColor: "#FFF6EB",
+  borderWidth: 1,
+  borderColor: "#F0D5A1",
+  paddingTop: 18,
+  paddingRight: 18,
+  paddingBottom: 18,
+  paddingLeft: 18,
+  gap: 8,
+});
+
+const LowStockSummaryEyebrow = styled(Text, {
+  color: "#A86518",
+  fontSize: 12,
+  lineHeight: 16,
+  letterSpacing: 1.2,
+  textTransform: "uppercase",
+});
+
+const LowStockSummaryValue = styled(Text, {
+  color: COLORS.textDark,
+  fontSize: 28,
+  lineHeight: 32,
+  fontWeight: "800",
+});
+
+const LowStockSummaryCopy = styled(Text, {
+  color: "#8A5A14",
+  fontSize: 14,
+  lineHeight: 20,
 });
 
 const Section = styled(View, {
@@ -458,6 +546,12 @@ const InlineActionTitle = styled(Text, {
   fontSize: 17,
   lineHeight: 21,
   fontWeight: "800",
+});
+
+const InlineActionCaption = styled(Text, {
+  color: COLORS.mist,
+  fontSize: 13,
+  lineHeight: 18,
 });
 
 const ActivityList = styled(View, {
@@ -1010,7 +1104,7 @@ const BottomBar = styled(View, {
   backgroundColor: COLORS.night,
   flexDirection: "row",
   justifyContent: "center",
-  gap: 8,
+  gap: 6,
   paddingVertical: 8,
   paddingHorizontal: 8,
   shadowColor: COLORS.shadow,
@@ -1065,10 +1159,11 @@ const BottomTab = styled(Pressable, {
   alignItems: "center",
   justifyContent: "center",
   borderRadius: 999,
-  minWidth: 72,
+  minWidth: 0,
   paddingHorizontal: 14,
   paddingVertical: 10,
   gap: 4,
+  flexShrink: 0,
 });
 
 const BottomTabInner = styled(View, {
@@ -1102,6 +1197,23 @@ const BottomTabText = styled(Text, {
   lineHeight: 16,
   fontWeight: "700",
   textAlign: "center",
+});
+
+const LoadMoreFooter = styled(View, {
+  minHeight: 56,
+  flexDirection: "row",
+  alignItems: "center",
+  justifyContent: "center",
+  gap: 10,
+  marginTop: 12,
+  marginBottom: 8,
+});
+
+const LoadMoreText = styled(Text, {
+  color: COLORS.textSoft,
+  fontSize: 14,
+  lineHeight: 19,
+  fontWeight: "700",
 });
 
 const ProfilePanel = styled(View, {
@@ -1249,14 +1361,15 @@ type DashboardScreenProps = {
   isLoggingOut: boolean;
   isProfileLoading: boolean;
   onLogout: () => void;
-  onOpenBulkUpload: () => void;
+  onOpenBulkUpload: (inventorySpace: InventorySpaceKey) => void;
   onOpenCreate: (prefill?: {
     barcode?: string | null;
     category?: string | null;
+    inventorySpace?: InventorySpaceKey | null;
     name?: string | null;
   }) => void;
   onOpenEdit: (item: PantryItemRecord) => void;
-  onOpenExpired: () => void;
+  onOpenExpired: (inventorySpace: InventorySpaceKey) => void;
   onProfileUpdated: (profile: ProfileRecord) => void;
   onShowToast: (message: string) => void;
   onTabChange: (tab: TabKey) => void;
@@ -1268,6 +1381,19 @@ type DashboardScreenProps = {
 };
 
 type PantryItemStatus = "expired" | "expiring_soon" | "safe";
+
+type InventoryItemSummary = {
+  badgeBackgroundColor: string;
+  badgeTextColor: string;
+  badgeLabel: string;
+  categoryLabel: string;
+  displayNotes: string | null;
+  expiryLabel: string;
+  item: PantryItemRecord;
+  lowStock: boolean;
+  searchText: string;
+  status: PantryItemStatus;
+};
 
 function getPantryItemStatus(expiryDate: string | null): PantryItemStatus {
   if (!expiryDate) {
@@ -1311,36 +1437,15 @@ function getDaysLeft(expiryDate: string | null) {
   );
 }
 
-function getInventoryBadgeCopy(item: PantryItemRecord) {
-  const status = getPantryItemStatus(item.expiry_date);
-  const daysLeft = getDaysLeft(item.expiry_date);
-
-  if (status === "expired") {
-    return "Expired";
-  }
-
-  if (status === "expiring_soon") {
-    if (daysLeft === 0) {
-      return "Due Today";
-    }
-
-    return `${daysLeft}d left`;
-  }
-
-  if (daysLeft === null) {
-    return "No date";
-  }
-
-  return `${daysLeft}d left`;
-}
-
-function getInventoryBadgeColors(item: PantryItemRecord) {
-  const status = getPantryItemStatus(item.expiry_date);
+function getInventoryBadgeDetails(expiryDate: string | null) {
+  const status = getPantryItemStatus(expiryDate);
+  const daysLeft = getDaysLeft(expiryDate);
 
   if (status === "expired") {
     return {
       backgroundColor: "#FFF1F1",
       textColor: "#B34242",
+      label: "Expired",
     };
   }
 
@@ -1348,12 +1453,27 @@ function getInventoryBadgeColors(item: PantryItemRecord) {
     return {
       backgroundColor: "#FFF6EB",
       textColor: "#A86518",
+      label: daysLeft === 0 ? "Due Today" : `${daysLeft}d left`,
     };
   }
 
   return {
     backgroundColor: COLORS.surfaceSoft,
     textColor: COLORS.deepGreen,
+    label: daysLeft === null ? "No date" : `${daysLeft}d left`,
+  };
+}
+
+function getInventoryBadgeCopy(item: PantryItemRecord) {
+  return getInventoryBadgeDetails(item.expiry_date).label;
+}
+
+function getInventoryBadgeColors(item: PantryItemRecord) {
+  const details = getInventoryBadgeDetails(item.expiry_date);
+
+  return {
+    backgroundColor: details.backgroundColor,
+    textColor: details.textColor,
   };
 }
 
@@ -1395,6 +1515,39 @@ function getTimeOfDayGreeting(hour: number) {
   return "Evening";
 }
 
+function buildInventoryItemSummary(item: PantryItemRecord): InventoryItemSummary {
+  const categoryLabel = item.category?.trim() || "Uncategorized";
+  const displayNotes = getPantryItemDisplayNotes(item);
+  const lowStock = getPantryItemIsLowStock(item);
+  const badgeDetails = getInventoryBadgeDetails(item.expiry_date);
+  const expiryLabel = formatExpiryCopy(item.expiry_date);
+  const status = getPantryItemStatus(item.expiry_date);
+  const searchText = [
+    item.name,
+    item.category,
+    item.id,
+    getPantryItemBarcode(item),
+    displayNotes,
+    categoryLabel,
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+
+  return {
+    badgeBackgroundColor: badgeDetails.backgroundColor,
+    badgeTextColor: badgeDetails.textColor,
+    badgeLabel: badgeDetails.label,
+    categoryLabel,
+    displayNotes,
+    expiryLabel,
+    item,
+    lowStock,
+    searchText,
+    status,
+  };
+}
+
 export default function DashboardScreen({
   activeTab,
   displayName,
@@ -1414,14 +1567,24 @@ export default function DashboardScreen({
   userEmail,
   userId,
 }: DashboardScreenProps) {
+  const PAGE_SIZE = 20;
   const quickScanHandledRef = useRef(false);
+  const [activeInventorySpace, setActiveInventorySpace] =
+    useState<InventorySpaceKey>("kitchen");
   const [search, setSearch] = useState("");
   const [selectedCategoryFilter, setSelectedCategoryFilter] = useState<string>("all");
+  const [inventoryVisibleCount, setInventoryVisibleCount] = useState(PAGE_SIZE);
+  const [alertsVisibleCount, setAlertsVisibleCount] = useState(PAGE_SIZE);
+  const [lowStockVisibleCount, setLowStockVisibleCount] = useState(PAGE_SIZE);
+  const [loadingMoreTarget, setLoadingMoreTarget] = useState<
+    "inventory" | "alerts" | "low_stock" | null
+  >(null);
   const [pantryItems, setPantryItems] = useState<PantryItemRecord[]>([]);
   const [isItemsLoading, setIsItemsLoading] = useState(true);
   const [inventoryError, setInventoryError] = useState<string | null>(null);
   const [deletingItemId, setDeletingItemId] = useState<string | null>(null);
   const [updatingQuantityId, setUpdatingQuantityId] = useState<string | null>(null);
+  const [updatingLowStockId, setUpdatingLowStockId] = useState<string | null>(null);
   const [previewImageItem, setPreviewImageItem] = useState<PantryItemRecord | null>(
     null,
   );
@@ -1429,9 +1592,10 @@ export default function DashboardScreen({
   const [showQuickScanModal, setShowQuickScanModal] = useState(false);
   const [isResolvingScannedBarcode, setIsResolvingScannedBarcode] = useState(false);
   const [savingPreferenceKey, setSavingPreferenceKey] = useState<
-    "one_day" | "three_days" | null
+    "one_day" | "three_days" | "fifteen_days" | "thirty_days" | null
   >(null);
   const [currentHour, setCurrentHour] = useState(() => new Date().getHours());
+  const loadMoreTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     const timer = setInterval(() => {
@@ -1440,6 +1604,14 @@ export default function DashboardScreen({
 
     return () => {
       clearInterval(timer);
+    };
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (loadMoreTimerRef.current) {
+        clearTimeout(loadMoreTimerRef.current);
+      }
     };
   }, []);
 
@@ -1486,12 +1658,34 @@ export default function DashboardScreen({
     };
   }, [refreshToken, userId]);
 
+  useEffect(() => {
+    setSearch("");
+    setSelectedCategoryFilter("all");
+  }, [activeInventorySpace]);
+
+  const activeSpaceItems = useMemo(
+    () =>
+      pantryItems.filter(
+        (item) => getPantryItemInventorySpace(item) === activeInventorySpace,
+      ),
+    [activeInventorySpace, pantryItems],
+  );
+  const inventoryItems = useMemo(
+    () => activeSpaceItems.map((item) => buildInventoryItemSummary(item)),
+    [activeSpaceItems],
+  );
+  const activeSpaceConfig = INVENTORY_SPACE_CONFIG[activeInventorySpace];
+  const activeSpacePalette = INVENTORY_SPACE_PALETTES[activeInventorySpace];
+
   const categoryFilters = useMemo(() => {
-    const categoryCounts = pantryItems.reduce<Record<string, number>>((accumulator, item) => {
-      const key = item.category?.trim() || "Uncategorized";
-      accumulator[key] = (accumulator[key] ?? 0) + 1;
-      return accumulator;
-    }, {});
+    const categoryCounts = inventoryItems.reduce<Record<string, number>>(
+      (accumulator, item) => {
+        const key = item.categoryLabel;
+        accumulator[key] = (accumulator[key] ?? 0) + 1;
+        return accumulator;
+      },
+      {},
+    );
 
     const orderedCategories = Object.keys(categoryCounts).sort((left, right) =>
       left.localeCompare(right),
@@ -1499,7 +1693,7 @@ export default function DashboardScreen({
 
     return [
       {
-        count: pantryItems.length,
+        count: inventoryItems.length,
         key: "all",
         label: "All",
       },
@@ -1509,7 +1703,7 @@ export default function DashboardScreen({
         label: category,
       })),
     ];
-  }, [pantryItems]);
+  }, [inventoryItems]);
 
   useEffect(() => {
     const filterStillExists = categoryFilters.some(
@@ -1524,8 +1718,8 @@ export default function DashboardScreen({
   const filteredItems = useMemo(() => {
     const query = search.trim().toLowerCase();
 
-    return pantryItems.filter((item) => {
-      const categoryLabel = item.category?.trim() || "Uncategorized";
+    return inventoryItems.filter((item) => {
+      const categoryLabel = item.categoryLabel;
       const matchesCategory =
         selectedCategoryFilter === "all" || categoryLabel === selectedCategoryFilter;
       if (!matchesCategory) {
@@ -1536,27 +1730,59 @@ export default function DashboardScreen({
         return true;
       }
 
-      return (
-        item.name.toLowerCase().includes(query) ||
-        item.category?.toLowerCase().includes(query) ||
-        item.id.toLowerCase().includes(query)
-      );
+      return item.searchText.includes(query);
     });
-  }, [pantryItems, search, selectedCategoryFilter]);
+  }, [inventoryItems, search, selectedCategoryFilter]);
 
-  const upcomingExpiryItems = pantryItems.filter((item) => {
-    return getPantryItemStatus(item.expiry_date) === "expiring_soon";
+  useEffect(() => {
+    if (search.trim().length > 0) {
+      setInventoryVisibleCount(filteredItems.length);
+      return;
+    }
+
+    setInventoryVisibleCount(PAGE_SIZE);
+  }, [activeInventorySpace, filteredItems.length, search, selectedCategoryFilter]);
+
+  useEffect(() => {
+    cancelLoadMoreTimer();
+  }, [activeTab, activeInventorySpace, search, selectedCategoryFilter]);
+
+  const upcomingExpiryItems = inventoryItems.filter((item) => {
+    return item.status === "expiring_soon";
   });
-  const expiredItems = pantryItems.filter((item) => {
-    return getPantryItemStatus(item.expiry_date) === "expired";
+  const expiredItems = inventoryItems.filter((item) => {
+    return item.status === "expired";
   });
+  const lowStockItems = inventoryItems.filter((item) => {
+    return item.lowStock;
+  });
+  useEffect(() => {
+    setAlertsVisibleCount(PAGE_SIZE);
+  }, [activeInventorySpace, upcomingExpiryItems.length]);
+
+  useEffect(() => {
+    setLowStockVisibleCount(PAGE_SIZE);
+  }, [activeInventorySpace, lowStockItems.length]);
+
+  const paginatedFilteredItems = useMemo(
+    () => filteredItems.slice(0, inventoryVisibleCount),
+    [filteredItems, inventoryVisibleCount],
+  );
+  const paginatedUpcomingExpiryItems = useMemo(
+    () => upcomingExpiryItems.slice(0, alertsVisibleCount),
+    [alertsVisibleCount, upcomingExpiryItems],
+  );
+  const paginatedLowStockItems = useMemo(
+    () => lowStockItems.slice(0, lowStockVisibleCount),
+    [lowStockItems, lowStockVisibleCount],
+  );
   const nearExpiryCount = upcomingExpiryItems.length;
-  const totalItems = pantryItems.length;
+  const totalItems = inventoryItems.length;
   const greetingTimeOfDay = getTimeOfDayGreeting(currentHour);
   const greetingSubtitle =
     nearExpiryCount === 0
-      ? "You are all clear right now. Keep this momentum and your shelves stay fresh."
-      : `You have ${nearExpiryCount} item${nearExpiryCount === 1 ? "" : "s"} entering the 3-day expiry window. Let's move on them early.`;
+      ? `Your ${activeSpaceConfig.label.toLowerCase()} inventory is clear right now. Keep this momentum and stay ahead of waste.`
+      : `You have ${nearExpiryCount} ${activeSpaceConfig.shortLabel.toLowerCase()} item${nearExpiryCount === 1 ? "" : "s"} entering the 3-day expiry window.`;
   const formattedCreatedAt = profile?.created_at
     ? new Intl.DateTimeFormat(undefined, {
         day: "numeric",
@@ -1576,28 +1802,40 @@ export default function DashboardScreen({
   const profileSupportsReminderSettings = profile
     ? Object.prototype.hasOwnProperty.call(
         profile,
+        "notify_fifteen_days_before_expiry",
+      ) &&
+      Object.prototype.hasOwnProperty.call(
+        profile,
         "notify_three_days_before_expiry",
       ) &&
       Object.prototype.hasOwnProperty.call(
         profile,
         "notify_one_day_before_expiry",
+      ) &&
+      Object.prototype.hasOwnProperty.call(
+        profile,
+        "notify_thirty_days_before_expiry",
       )
     : false;
+  const notifyFifteenDaysBeforeExpiry =
+    profile?.notify_fifteen_days_before_expiry !== false;
   const notifyThreeDaysBeforeExpiry =
     profile?.notify_three_days_before_expiry !== false;
   const notifyOneDayBeforeExpiry = profile?.notify_one_day_before_expiry !== false;
+  const notifyThirtyDaysBeforeExpiry =
+    profile?.notify_thirty_days_before_expiry !== false;
   const activityEntries = useMemo(() => {
     const now = Date.now();
     const twentyFourHoursAgo = now - 24 * 60 * 60 * 1000;
 
-    const addedItems = pantryItems
+    const addedItems = activeSpaceItems
       .filter((item) => new Date(item.created_at).getTime() >= twentyFourHoursAgo)
       .sort(
         (left, right) =>
           new Date(right.created_at).getTime() - new Date(left.created_at).getTime(),
       );
 
-    const updatedItems = pantryItems
+    const updatedItems = activeSpaceItems
       .filter((item) => {
         const createdAt = new Date(item.created_at).getTime();
         const updatedAt = new Date(item.updated_at).getTime();
@@ -1608,7 +1846,7 @@ export default function DashboardScreen({
           new Date(right.updated_at).getTime() - new Date(left.updated_at).getTime(),
       );
 
-    const recentlyExpiredItems = pantryItems
+    const recentlyExpiredItems = activeSpaceItems
       .filter((item) => {
         if (!item.expiry_date) {
           return false;
@@ -1666,7 +1904,7 @@ export default function DashboardScreen({
     }
 
     return entries.slice(0, 3);
-  }, [pantryItems]);
+  }, [activeSpaceItems]);
 
   const tabs: Array<{
     key: TabKey;
@@ -1680,6 +1918,12 @@ export default function DashboardScreen({
       icon: "layers-outline",
       activeIcon: "layers",
       label: "Inventory",
+    },
+    {
+      key: "low_stock",
+      icon: "alert-circle-outline",
+      activeIcon: "alert-circle",
+      label: "Low Stock",
     },
     {
       key: "alerts",
@@ -1699,9 +1943,24 @@ export default function DashboardScreen({
       return nearExpiryCount > 0;
     }
 
+    if (tab.key === "low_stock") {
+      return lowStockItems.length > 0;
+    }
+
     return true;
   });
-  const shouldSpreadTabs = visibleTabs.length === 4;
+  const navTabCount = visibleTabs.length;
+  const shouldCompactTabs = navTabCount > 4;
+  const navPaddingHorizontal = shouldCompactTabs ? 10 : 12;
+  const navPaddingVertical = shouldCompactTabs ? 6 : 7;
+  const navTabPaddingHorizontal = shouldCompactTabs ? 8 : 12;
+  const navTabPaddingVertical = shouldCompactTabs ? 7 : 9;
+  const navTabGap = shouldCompactTabs ? 3 : 4;
+  const navIconSize = shouldCompactTabs ? 16 : 18;
+  const navLabelFontSize = shouldCompactTabs ? 10 : 11;
+  const navLabelLineHeight = shouldCompactTabs ? 12 : 14;
+  const navBottomOffset = shouldCompactTabs ? 12 : 16;
+  const navBarGap = shouldCompactTabs ? 3 : 8;
 
   useEffect(() => {
     if (activeTab === "alerts" && nearExpiryCount === 0) {
@@ -1709,8 +1968,16 @@ export default function DashboardScreen({
     }
   }, [activeTab, nearExpiryCount, onTabChange]);
 
+  useEffect(() => {
+    if (activeTab === "low_stock" && lowStockItems.length === 0) {
+      onTabChange("home");
+    }
+  }, [activeTab, lowStockItems.length, onTabChange]);
+
   function startCreateFlow() {
-    onOpenCreate();
+    onOpenCreate({
+      inventorySpace: activeInventorySpace,
+    });
   }
 
   function startQuickScanFlow() {
@@ -1726,6 +1993,91 @@ export default function DashboardScreen({
     onTabChange(nextTab);
   }
 
+  function cancelLoadMoreTimer() {
+    if (loadMoreTimerRef.current) {
+      clearTimeout(loadMoreTimerRef.current);
+      loadMoreTimerRef.current = null;
+    }
+    setLoadingMoreTarget(null);
+  }
+
+  function scheduleLoadMore(target: "inventory" | "alerts" | "low_stock", updateCount: () => void) {
+    if (loadingMoreTarget !== null) {
+      return;
+    }
+
+    setLoadingMoreTarget(target);
+
+    if (loadMoreTimerRef.current) {
+      clearTimeout(loadMoreTimerRef.current);
+    }
+
+    loadMoreTimerRef.current = setTimeout(() => {
+      updateCount();
+      loadMoreTimerRef.current = null;
+      setLoadingMoreTarget(null);
+    }, 220);
+  }
+
+  const handleDashboardScroll: NonNullable<
+    ComponentProps<typeof ScrollView>["onScroll"]
+  > = (event) => {
+    if (search.trim().length > 0) {
+      return;
+    }
+
+    const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
+    const distanceFromBottom =
+      contentSize.height - (contentOffset.y + layoutMeasurement.height);
+    const isNearBottom = distanceFromBottom < 320;
+
+    if (!isNearBottom) {
+      return;
+    }
+
+    if (activeTab === "inventory" && inventoryVisibleCount < filteredItems.length) {
+      const nextLimit = filteredItems.length;
+      scheduleLoadMore("inventory", () => {
+        setInventoryVisibleCount((existingCount) =>
+          Math.min(existingCount + PAGE_SIZE, nextLimit),
+        );
+      });
+      return;
+    }
+
+    if (activeTab === "alerts" && alertsVisibleCount < upcomingExpiryItems.length) {
+      const nextLimit = upcomingExpiryItems.length;
+      scheduleLoadMore("alerts", () => {
+        setAlertsVisibleCount((existingCount) =>
+          Math.min(existingCount + PAGE_SIZE, nextLimit),
+        );
+      });
+      return;
+    }
+
+    if (activeTab === "low_stock" && lowStockVisibleCount < lowStockItems.length) {
+      const nextLimit = lowStockItems.length;
+      scheduleLoadMore("low_stock", () => {
+        setLowStockVisibleCount((existingCount) =>
+          Math.min(existingCount + PAGE_SIZE, nextLimit),
+        );
+      });
+    }
+  };
+
+  function renderLoadMoreFooter(target: "inventory" | "alerts" | "low_stock") {
+    if (loadingMoreTarget !== target) {
+      return null;
+    }
+
+    return (
+      <LoadMoreFooter>
+        <ActivityIndicator color={activeSpacePalette.accent} size="small" />
+        <LoadMoreText>Loading more…</LoadMoreText>
+      </LoadMoreFooter>
+    );
+  }
+
   async function handleQuickBarcodeScanned(scannedBarcode: string) {
     const normalizedBarcode = scannedBarcode.trim();
 
@@ -1738,7 +2090,7 @@ export default function DashboardScreen({
     setIsResolvingScannedBarcode(true);
 
     const existingItem =
-      pantryItems.find((item) => getPantryItemBarcode(item.notes) === normalizedBarcode) ??
+      pantryItems.find((item) => getPantryItemBarcode(item) === normalizedBarcode) ??
       null;
 
     let resolvedName: string | null = existingItem?.name ?? null;
@@ -1764,6 +2116,7 @@ export default function DashboardScreen({
     const prefill = {
       barcode: normalizedBarcode,
       category: existingItem?.category ?? null,
+      inventorySpace: activeInventorySpace,
       name: resolvedName,
     };
 
@@ -1852,6 +2205,58 @@ export default function DashboardScreen({
       );
     } finally {
       setUpdatingQuantityId(null);
+    }
+  }
+
+  async function handleLowStockChange(item: PantryItemRecord, nextValue: boolean) {
+    if (updatingLowStockId) {
+      return;
+    }
+
+    setUpdatingLowStockId(item.id);
+    setPantryItems((currentItems) =>
+      currentItems.map((currentItem) =>
+        currentItem.id === item.id
+          ? {
+              ...currentItem,
+              stock_status: nextValue ? "low_stock" : "in_stock",
+            }
+          : currentItem,
+      ),
+    );
+
+    try {
+      const { data, error } = await updatePantryItem(userId, item.id, {
+        stock_status: nextValue ? "low_stock" : "in_stock",
+      });
+
+      if (error) {
+        throw error;
+      }
+
+      setPantryItems((currentItems) =>
+        currentItems.map((currentItem) =>
+          currentItem.id === item.id ? data : currentItem,
+        ),
+      );
+    } catch (error) {
+      setPantryItems((currentItems) =>
+        currentItems.map((currentItem) =>
+          currentItem.id === item.id
+              ? {
+                  ...currentItem,
+                  stock_status: item.stock_status ?? "in_stock",
+                }
+            : currentItem,
+        ),
+      );
+
+      Alert.alert(
+        "Couldn't Update Stock Status",
+        error instanceof Error ? error.message : "Please try again.",
+      );
+    } finally {
+      setUpdatingLowStockId(null);
     }
   }
 
@@ -2050,14 +2455,25 @@ export default function DashboardScreen({
   }
 
   async function handleNotificationPreferenceChange(
-    key: "notify_one_day_before_expiry" | "notify_three_days_before_expiry",
+    key:
+      | "notify_one_day_before_expiry"
+      | "notify_three_days_before_expiry"
+      | "notify_fifteen_days_before_expiry"
+      | "notify_thirty_days_before_expiry",
     value: boolean,
   ) {
     if (!profile) {
       return;
     }
 
-    const savingKey = key === "notify_one_day_before_expiry" ? "one_day" : "three_days";
+    const savingKey =
+      key === "notify_one_day_before_expiry"
+        ? "one_day"
+        : key === "notify_three_days_before_expiry"
+          ? "three_days"
+          : key === "notify_fifteen_days_before_expiry"
+            ? "fifteen_days"
+            : "thirty_days";
     const previousValue =
       key === "notify_one_day_before_expiry"
         ? notifyOneDayBeforeExpiry
@@ -2101,6 +2517,53 @@ export default function DashboardScreen({
     } finally {
       setSavingPreferenceKey(null);
     }
+  }
+
+  function renderSpaceTabs() {
+    return (
+      <SpaceSwitcher>
+        {INVENTORY_SPACE_OPTIONS.map((space) => {
+          const active = activeInventorySpace === space.key;
+
+          return (
+            <SpaceTab
+              key={space.key}
+              accessibilityLabel={`Open ${space.label} inventory space`}
+              backgroundColor={
+                active
+                  ? INVENTORY_SPACE_PALETTES[space.key].tabActiveBackground
+                  : COLORS.surface
+              }
+              borderColor={
+                active
+                  ? INVENTORY_SPACE_PALETTES[space.key].accentSoftBorder
+                  : COLORS.pageLine
+              }
+              onPress={() => setActiveInventorySpace(space.key)}
+            >
+              <SpaceTabLabel
+                color={
+                  active
+                    ? INVENTORY_SPACE_PALETTES[space.key].tabActiveText
+                    : COLORS.textDark
+                }
+              >
+                {space.shortLabel}
+              </SpaceTabLabel>
+              <SpaceTabMeta
+                color={
+                  active
+                    ? INVENTORY_SPACE_PALETTES[space.key].tabActiveMeta
+                    : COLORS.textSoft
+                }
+              >
+                {space.label}
+              </SpaceTabMeta>
+            </SpaceTab>
+          );
+        })}
+      </SpaceSwitcher>
+    );
   }
 
   function renderOverview() {
@@ -2177,31 +2640,66 @@ export default function DashboardScreen({
             </HeaderActionRow>
           </HeaderRow>
 
-          <HeroCard>
-            <HeroGlow />
-            <HeroGlowSecondary />
-            <HeroStripe top={28} left={122} />
-            <HeroStripe top={104} left={-26} />
+          <InlineActionCard
+            accessibilityLabel="Open barcode scanner"
+            backgroundColor={activeSpacePalette.inlineActionBackground}
+            borderColor={activeSpacePalette.accentSoftBorder}
+            onPress={startQuickScanFlow}
+          >
+            <InlineActionGlow backgroundColor={activeSpacePalette.glowPrimary} />
+            <View flex={1} gap={5}>
+              <InlineActionTitle color={activeSpacePalette.inlineActionForeground}>
+                Scan Barcode
+              </InlineActionTitle>
+              <InlineActionCaption color={activeSpacePalette.primaryActionMutedText}>
+                Use the camera to jump straight into add or update.
+              </InlineActionCaption>
+            </View>
+
+            <View alignItems="center" gap={8}>
+              <QuickActionBubble backgroundColor={activeSpacePalette.accentSurface}>
+                <Ionicons color={activeSpacePalette.accent} name="scan-outline" size={24} />
+              </QuickActionBubble>
+            </View>
+          </InlineActionCard>
+
+          {renderSpaceTabs()}
+
+          <HeroCard
+            backgroundColor={activeSpacePalette.heroBackground}
+            borderColor={activeSpacePalette.accentSoftBorder}
+          >
+            <HeroGlow backgroundColor={activeSpacePalette.glowPrimary} />
+            <HeroGlowSecondary backgroundColor={activeSpacePalette.glowSecondary} />
+            <HeroStripe backgroundColor={activeSpacePalette.heroStripe} top={28} left={122} />
+            <HeroStripe backgroundColor={activeSpacePalette.heroStripe} top={104} left={-26} />
 
             <HeroBottom>
-              <HeroLabel>Freshness Snapshot</HeroLabel>
-              <HeroValue>{totalItems} Active Items</HeroValue>
-              <HeroMeta>
-                Move fast on the soonest-to-expire items first so less stock goes to waste.
+              <HeroLabel color={activeSpacePalette.heroMeta}>{activeSpaceConfig.label} Snapshot</HeroLabel>
+              <HeroValue color={activeSpacePalette.heroText}>{totalItems} Active Items</HeroValue>
+              <HeroMeta color={activeSpacePalette.heroMeta}>
+                {lowStockItems.length === 0
+                  ? `Keep your ${activeSpaceConfig.label.toLowerCase()} records current so nothing critical slips through.`
+                  : `${lowStockItems.length} item${lowStockItems.length === 1 ? "" : "s"} are marked low stock in this space.`}
               </HeroMeta>
               <HeroMetaRow>
                 <HeroBadge
                   accessibilityLabel="Open expired items"
-                  onPress={onOpenExpired}
+                  backgroundColor={activeSpacePalette.pillBackground}
+                  borderColor={activeSpacePalette.pillBorder}
+                  onPress={() => onOpenExpired(activeInventorySpace)}
                 >
-                  <HeroBadgeText>
+                  <HeroBadgeText color={activeSpacePalette.pillText}>
                     {expiredItems.length === 0
                       ? "No expired items, nice!"
                       : `${expiredItems.length} Expired`}
                   </HeroBadgeText>
                 </HeroBadge>
-                <HeroStatPill>
-                  <HeroStatText>
+                <HeroStatPill
+                  backgroundColor={activeSpacePalette.pillBackground}
+                  borderColor={activeSpacePalette.pillBorder}
+                >
+                  <HeroStatText color={activeSpacePalette.pillText}>
                     {nearExpiryCount === 0
                       ? "Pantry health is good"
                       : `${nearExpiryCount} Near Expiry`}
@@ -2238,37 +2736,58 @@ export default function DashboardScreen({
           <QuickActionsRow>
             <QuickActionButton
               accessibilityLabel="Add a new pantry item"
+              backgroundColor={activeSpacePalette.actionBackground}
               width="48%"
               onPress={startCreateFlow}
             >
-              <QuickActionBubble>
-                <Ionicons color={COLORS.white} name="nutrition-outline" size={24} />
+              <QuickActionBubble backgroundColor={activeSpacePalette.accentSurface}>
+                <Ionicons color={activeSpacePalette.accent} name="nutrition-outline" size={24} />
               </QuickActionBubble>
               <View gap={6}>
-                <QuickActionLabel>Add Item</QuickActionLabel>
-                <QuickActionCaption>Create a new pantry record</QuickActionCaption>
+                <QuickActionLabel color={activeSpacePalette.actionText}>Add Item</QuickActionLabel>
+                <QuickActionCaption color={activeSpacePalette.primaryActionMutedText}>
+                  {activeSpaceConfig.quickActionLabel}
+                </QuickActionCaption>
                 <View alignItems="center" flexDirection="row" gap={6}>
-                  <QuickActionHint>Tap to Add</QuickActionHint>
-                  <Ionicons color={COLORS.mist} name="arrow-forward" size={14} />
+                  <QuickActionHint color={activeSpacePalette.primaryActionMutedText}>
+                    Tap to Add
+                  </QuickActionHint>
+                  <Ionicons
+                    color={activeSpacePalette.primaryActionMutedText}
+                    name="arrow-forward"
+                    size={14}
+                  />
                 </View>
               </View>
             </QuickActionButton>
 
             <QuickActionButton
               accessibilityLabel="View inventory"
-              backgroundColor={COLORS.night}
+              backgroundColor={activeSpacePalette.secondaryActionBackground}
+              borderColor={activeSpacePalette.secondaryActionBorder}
+              borderWidth={1}
               width="48%"
               onPress={() => onTabChange("inventory")}
             >
-              <QuickActionBubble>
-                <Ionicons color={COLORS.white} name="layers-outline" size={24} />
+              <QuickActionBubble backgroundColor={activeSpacePalette.secondaryActionBubble}>
+                <Ionicons color={activeSpacePalette.accent} name="layers-outline" size={24} />
               </QuickActionBubble>
               <View gap={6}>
-                <QuickActionLabel>View Inventory</QuickActionLabel>
-                <QuickActionCaption>Scan all active pantry rows</QuickActionCaption>
+                <QuickActionLabel color={activeSpacePalette.secondaryActionText}>
+                  View Inventory
+                </QuickActionLabel>
+                <QuickActionCaption color={activeSpacePalette.secondaryActionText}>
+                  Scan all active pantry rows
+                </QuickActionCaption>
                 <View alignItems="center" flexDirection="row" gap={6}>
-                  <QuickActionHint>Open Inventory</QuickActionHint>
-                  <Ionicons color={COLORS.mist} name="arrow-forward" size={14} />
+                  <QuickActionHint color={activeSpacePalette.secondaryActionMutedText}>
+                    Open Inventory
+                  </QuickActionHint>
+                  <Ionicons
+                    color={activeSpacePalette.secondaryActionMutedText}
+                    name="arrow-forward"
+                    size={14}
+                  />
                 </View>
               </View>
             </QuickActionButton>
@@ -2276,22 +2795,22 @@ export default function DashboardScreen({
             <QuickActionButton
               accessibilityLabel="Bulk upload inventory spreadsheet"
               backgroundColor={COLORS.surface}
-              borderColor={COLORS.pageLine}
+              borderColor={activeSpacePalette.accentSoftBorder}
               borderWidth={1}
               width="48%"
-              onPress={onOpenBulkUpload}
+              onPress={() => onOpenBulkUpload(activeInventorySpace)}
             >
-              <QuickActionBubble backgroundColor={COLORS.surfaceSoft}>
-                <Ionicons color={COLORS.deepGreen} name="cloud-upload-outline" size={24} />
+              <QuickActionBubble backgroundColor={activeSpacePalette.accentSurface}>
+                <Ionicons color={activeSpacePalette.accent} name="cloud-upload-outline" size={24} />
               </QuickActionBubble>
               <View gap={6}>
                 <QuickActionLabel color={COLORS.textDark}>Bulk Upload</QuickActionLabel>
                 <QuickActionCaption color={COLORS.textSoft}>
-                  Import `.xls`, `.xlsx`, or `.csv` files in one flow
+                  Import `.xls`, `.xlsx`, or `.csv` files into {activeSpaceConfig.shortLabel.toLowerCase()}
                 </QuickActionCaption>
                 <View alignItems="center" flexDirection="row" gap={6}>
-                  <QuickActionHint color={COLORS.deepGreen}>Upload</QuickActionHint>
-                  <Ionicons color={COLORS.deepGreen} name="arrow-forward" size={14} />
+                  <QuickActionHint color={activeSpacePalette.accent}>Upload</QuickActionHint>
+                  <Ionicons color={activeSpacePalette.accent} name="arrow-forward" size={14} />
                 </View>
               </View>
             </QuickActionButton>
@@ -2299,14 +2818,14 @@ export default function DashboardScreen({
             <QuickActionButton
               accessibilityLabel="Scan a product barcode"
               backgroundColor={COLORS.surface}
-              borderColor={COLORS.pageLine}
+              borderColor={activeSpacePalette.accentSoftBorder}
               borderWidth={1}
               width="48%"
               opacity={isResolvingScannedBarcode ? 0.72 : 1}
               onPress={startQuickScanFlow}
             >
-              <QuickActionBubble backgroundColor={COLORS.surfaceSoft}>
-                <Ionicons color={COLORS.deepGreen} name="scan-outline" size={24} />
+              <QuickActionBubble backgroundColor={activeSpacePalette.accentSurface}>
+                <Ionicons color={activeSpacePalette.accent} name="scan-outline" size={24} />
               </QuickActionBubble>
               <View gap={6}>
                 <QuickActionLabel color={COLORS.textDark}>Barcode Scanner</QuickActionLabel>
@@ -2316,8 +2835,8 @@ export default function DashboardScreen({
                     : "Scan a code and jump into the right item flow"}
                 </QuickActionCaption>
                 <View alignItems="center" flexDirection="row" gap={6}>
-                  <QuickActionHint color={COLORS.deepGreen}>Scan</QuickActionHint>
-                  <Ionicons color={COLORS.deepGreen} name="arrow-forward" size={14} />
+                  <QuickActionHint color={activeSpacePalette.accent}>Scan</QuickActionHint>
+                  <Ionicons color={activeSpacePalette.accent} name="arrow-forward" size={14} />
                 </View>
               </View>
             </QuickActionButton>
@@ -2326,7 +2845,10 @@ export default function DashboardScreen({
         </Section>
 
         {activityEntries.length > 0 ? (
-          <FullBleedSection>
+          <FullBleedSection
+            backgroundColor={activeSpacePalette.sectionTint}
+            borderColor={activeSpacePalette.sectionTintBorder}
+          >
             <SectionHeading>Today’s Activity</SectionHeading>
             <SectionBody>
               Added, updated, or newly expired items from the last 24 hours.
@@ -2350,205 +2872,319 @@ export default function DashboardScreen({
   }
 
   function renderInventoryView() {
-    return (
-      <Section>
-        <DashboardHeader paddingLeft={0} paddingRight={0}>
-          <View gap={8}>
-            <SectionTitle>Search Inventory</SectionTitle>
-            <SectionBody>
-              Look up stock by item name, category, or internal code before you
-              edit the next record.
-            </SectionBody>
-          </View>
-        </DashboardHeader>
+    if (inventoryError) {
+      return (
+        <Section>
+          <DashboardHeader paddingLeft={0} paddingRight={0}>
+            {renderSpaceTabs()}
 
-        <SearchShell>
-          <TextInput
-            accessibilityLabel="Search inventory"
-            autoCapitalize="none"
-            placeholder="Search item, category, or code…"
-            placeholderTextColor={COLORS.softGray}
-            spellCheck={false}
-            style={styles.searchInput}
-            value={search}
-            onChangeText={setSearch}
-          />
-        </SearchShell>
+            <View gap={8}>
+              <SectionTitle>{activeSpaceConfig.label} Inventory</SectionTitle>
+              <SectionBody>
+                Look up stock by item name, category, or internal code inside this
+                inventory space before you edit the next record.
+              </SectionBody>
+            </View>
+          </DashboardHeader>
 
-        <InlineActionCard
-          accessibilityLabel="Add a new pantry item"
-          onPress={startCreateFlow}
-        >
-          <InlineActionGlow />
-          <View flex={1} gap={5}>
-            <InlineActionTitle>Add New Item</InlineActionTitle>
-          </View>
-
-          <View alignItems="center" gap={8}>
-            <QuickActionBubble
-              width={52}
-              height={52}
-              backgroundColor="rgba(255,255,255,0.14)"
-            >
-              <Ionicons color={COLORS.white} name="add" size={24} />
-            </QuickActionBubble>
-          </View>
-        </InlineActionCard>
-
-        <FilterWrap>
-          {categoryFilters.map((category) => {
-            const active = selectedCategoryFilter === category.key;
-
-            return (
-              <FilterChip
-                key={category.key}
-                accessibilityLabel={`Filter inventory by ${category.label}`}
-                backgroundColor={active ? COLORS.deepGreen : COLORS.surface}
-                borderColor={active ? COLORS.deepGreen : COLORS.pageLine}
-                onPress={() => setSelectedCategoryFilter(category.key)}
-              >
-                <FilterChipLabel color={active ? COLORS.white : COLORS.textDark}>
-                  {category.label} · {category.count}
-                </FilterChipLabel>
-              </FilterChip>
-            );
-          })}
-        </FilterWrap>
-
-        {inventoryError ? (
           <EmptyCard>
             <SectionHeading>Inventory Unavailable</SectionHeading>
             <SectionBody>{inventoryError}</SectionBody>
           </EmptyCard>
-        ) : isItemsLoading ? (
-          <>
-            {Array.from({ length: 3 }).map((_, index) => (
-              <SkeletonCard key={index}>
-                <InventoryRow alignItems="flex-start">
-                  <SkeletonBlock height={68} width={68} borderRadius={18} />
-                  <View gap={8} flex={1}>
-                    <SkeletonBlock height={12} width="28%" />
-                    <SkeletonBlock height={18} width="58%" />
-                    <SkeletonBlock height={14} width="76%" />
-                    <SkeletonBlock height={14} width="64%" />
-                  </View>
-                  <View gap={10} alignItems="flex-end">
-                    <SkeletonBlock height={28} width={74} borderRadius={999} />
-                    <SkeletonBlock height={30} width={74} borderRadius={999} />
-                  </View>
-                </InventoryRow>
-              </SkeletonCard>
-            ))}
-          </>
-        ) : filteredItems.length === 0 ? (
-          <EmptyCard>
-            <SectionHeading>No Matching Items</SectionHeading>
-            <SectionBody>
-              Try another keyword or open Add Item to write your first pantry
-              row.
-            </SectionBody>
-          </EmptyCard>
-        ) : (
-          filteredItems.map((item) => (
-            <InventoryCardPressable
-              key={item.id}
-              accessibilityLabel={`Edit ${item.name}`}
-              accessibilityRole="button"
-              onPress={() => startEditFlow(item)}
-            >
-              <InventoryCard>
-                <InventoryRow alignItems="flex-start">
-                  <InventoryMedia>
-                    {item.photo_url ? (
-                      <Pressable
-                        accessibilityLabel={`Preview ${item.name} photo`}
-                        style={styles.inventoryImageButton}
-                        onPress={(event) => {
-                          event.stopPropagation();
-                          setPreviewImageItem(item);
-                        }}
-                      >
-                        <Image
-                          accessibilityLabel={`${item.name} photo`}
-                          resizeMode="cover"
-                          source={{ uri: item.photo_url }}
-                          style={styles.inventoryImage}
-                        />
-                      </Pressable>
-                    ) : (
-                      <InventoryImageFallback>◔</InventoryImageFallback>
-                    )}
-                  </InventoryMedia>
+        </Section>
+      );
+    }
 
-                  <View gap={8} flex={1} minWidth={0}>
-                    <View gap={4}>
-                      <Eyebrow>{item.category || "Uncategorized"}</Eyebrow>
-                      <InventoryName>{item.name}</InventoryName>
-                      <InventoryMeta>
-                        {formatExpiryCopy(item.expiry_date)}
-                      </InventoryMeta>
+    if (isItemsLoading && pantryItems.length === 0) {
+      return (
+        <Section>
+          <DashboardHeader paddingLeft={0} paddingRight={0}>
+            {renderSpaceTabs()}
+
+            <View gap={8}>
+              <SectionTitle>{activeSpaceConfig.label} Inventory</SectionTitle>
+              <SectionBody>
+                Look up stock by item name, category, or internal code inside this
+                inventory space before you edit the next record.
+              </SectionBody>
+            </View>
+          </DashboardHeader>
+
+          {Array.from({ length: 3 }).map((_, index) => (
+            <SkeletonCard key={index}>
+              <InventoryRow alignItems="flex-start">
+                <SkeletonBlock height={68} width={68} borderRadius={18} />
+                <View gap={8} flex={1}>
+                  <SkeletonBlock height={12} width="28%" />
+                  <SkeletonBlock height={18} width="58%" />
+                  <SkeletonBlock height={14} width="76%" />
+                  <SkeletonBlock height={14} width="64%" />
+                </View>
+                <View gap={10} alignItems="flex-end">
+                  <SkeletonBlock height={28} width={74} borderRadius={999} />
+                  <SkeletonBlock height={30} width={74} borderRadius={999} />
+                </View>
+              </InventoryRow>
+            </SkeletonCard>
+          ))}
+        </Section>
+      );
+    }
+
+    return (
+      <FlatList<InventoryItemSummary>
+        style={styles.inventoryList}
+        contentContainerStyle={styles.inventoryListContent}
+        data={paginatedFilteredItems}
+        initialNumToRender={8}
+        keyboardDismissMode="on-drag"
+        keyboardShouldPersistTaps="handled"
+        ListEmptyComponent={
+          <Section>
+            <EmptyCard>
+              <SectionHeading>No Matching Items</SectionHeading>
+              <SectionBody>
+                Try another keyword or open Add Item to write your first pantry
+                row.
+              </SectionBody>
+            </EmptyCard>
+          </Section>
+        }
+        ListFooterComponent={renderLoadMoreFooter("inventory")}
+        ListHeaderComponent={
+          <Section>
+            <DashboardHeader paddingLeft={0} paddingRight={0}>
+              {renderSpaceTabs()}
+
+              <View gap={8}>
+                <SectionTitle>{activeSpaceConfig.label} Inventory</SectionTitle>
+                <SectionBody>
+                  Look up stock by item name, category, or internal code inside this
+                  inventory space before you edit the next record.
+                </SectionBody>
+              </View>
+            </DashboardHeader>
+
+            <SearchShell>
+              <TextInput
+                accessibilityLabel="Search inventory"
+                autoCapitalize="none"
+                placeholder="Search item, category, or code…"
+                placeholderTextColor={COLORS.softGray}
+                spellCheck={false}
+                style={styles.searchInput}
+                value={search}
+                onChangeText={setSearch}
+              />
+            </SearchShell>
+
+            <InlineActionCard
+              accessibilityLabel="Add a new pantry item"
+              backgroundColor={activeSpacePalette.inlineActionBackground}
+              borderColor={activeSpacePalette.accentSoftBorder}
+              onPress={startCreateFlow}
+            >
+              <InlineActionGlow backgroundColor={activeSpacePalette.glowPrimary} />
+              <View flex={1} gap={5}>
+                <InlineActionTitle color={activeSpacePalette.inlineActionForeground}>
+                  {activeSpaceConfig.quickActionLabel}
+                </InlineActionTitle>
+              </View>
+
+              <View alignItems="center" gap={8}>
+                <QuickActionBubble
+                  width={52}
+                  height={52}
+                  backgroundColor={activeSpacePalette.accentSurface}
+                >
+                  <Ionicons color={activeSpacePalette.accent} name="add" size={24} />
+                </QuickActionBubble>
+              </View>
+            </InlineActionCard>
+
+            <FilterWrap>
+              {categoryFilters.map((category) => {
+                const active = selectedCategoryFilter === category.key;
+
+                return (
+                  <FilterChip
+                    key={category.key}
+                    accessibilityLabel={`Filter inventory by ${category.label}`}
+                    backgroundColor={
+                      active ? activeSpacePalette.accent : COLORS.surface
+                    }
+                    borderColor={active ? activeSpacePalette.accent : COLORS.pageLine}
+                    onPress={() => setSelectedCategoryFilter(category.key)}
+                  >
+                    <FilterChipLabel color={active ? COLORS.white : COLORS.textDark}>
+                      {category.label} · {category.count}
+                    </FilterChipLabel>
+                  </FilterChip>
+                );
+              })}
+            </FilterWrap>
+          </Section>
+        }
+        keyExtractor={(item) => item.item.id}
+        onEndReached={() => {
+          if (search.trim().length > 0) {
+            return;
+          }
+
+          if (inventoryVisibleCount >= filteredItems.length) {
+            return;
+          }
+
+          const nextLimit = filteredItems.length;
+          scheduleLoadMore("inventory", () => {
+            setInventoryVisibleCount((existingCount) =>
+              Math.min(existingCount + PAGE_SIZE, nextLimit),
+            );
+          });
+        }}
+        onEndReachedThreshold={0.6}
+        removeClippedSubviews
+        updateCellsBatchingPeriod={32}
+        windowSize={7}
+        maxToRenderPerBatch={8}
+        renderItem={({ item }) => {
+          const inventory = item.item;
+
+          return (
+            <Section>
+              <InventoryCardPressable
+                accessibilityLabel={`Edit ${inventory.name}`}
+                accessibilityRole="button"
+                onPress={() => startEditFlow(inventory)}
+              >
+                <InventoryCard>
+                  <InventoryRow alignItems="flex-start">
+                    <InventoryMedia>
+                      {inventory.photo_url ? (
+                        <Pressable
+                          accessibilityLabel={`Preview ${inventory.name} photo`}
+                          style={styles.inventoryImageButton}
+                          onPress={(event) => {
+                            event.stopPropagation();
+                            setPreviewImageItem(inventory);
+                          }}
+                        >
+                          <Image
+                            accessibilityLabel={`${inventory.name} photo`}
+                            resizeMode="cover"
+                            source={{ uri: inventory.photo_url }}
+                            style={styles.inventoryImage}
+                          />
+                        </Pressable>
+                      ) : (
+                        <InventoryImageFallback>◔</InventoryImageFallback>
+                      )}
+                    </InventoryMedia>
+
+                    <View gap={8} flex={1} minWidth={0}>
+                      <View gap={4}>
+                        <Eyebrow color={activeSpacePalette.accent}>
+                          {item.categoryLabel}
+                        </Eyebrow>
+                        <InventoryName>{inventory.name}</InventoryName>
+                        <InventoryMeta>{item.expiryLabel}</InventoryMeta>
+                      </View>
+
+                      <QuantityControl>
+                        <QuantityButton
+                          accessibilityLabel={`Decrease quantity for ${inventory.name}`}
+                          opacity={
+                            inventory.quantity <= 1 ||
+                            updatingQuantityId === inventory.id
+                              ? 0.45
+                              : 1
+                          }
+                          onPress={() => void handleQuantityChange(inventory, -1)}
+                        >
+                          <QuantityButtonText>−</QuantityButtonText>
+                        </QuantityButton>
+
+                        <QuantityValue>
+                          {updatingQuantityId === inventory.id
+                            ? "Saving…"
+                            : `Qty ${inventory.quantity}`}
+                        </QuantityValue>
+
+                        <QuantityButton
+                          accessibilityLabel={`Increase quantity for ${inventory.name}`}
+                          opacity={updatingQuantityId === inventory.id ? 0.45 : 1}
+                          onPress={() => void handleQuantityChange(inventory, 1)}
+                        >
+                          <QuantityButtonText>+</QuantityButtonText>
+                        </QuantityButton>
+                      </QuantityControl>
+
+                      <View alignItems="flex-start">
+                        <StatusToggleChip
+                          accessibilityLabel={
+                            item.lowStock
+                              ? `Mark ${inventory.name} as not low stock`
+                              : `Mark ${inventory.name} as low stock`
+                          }
+                          backgroundColor={
+                            item.lowStock ? "#FFE7DF" : COLORS.surfaceSoft
+                          }
+                          borderColor={
+                            item.lowStock ? "#F0B2A4" : COLORS.pageLine
+                          }
+                          opacity={updatingLowStockId === inventory.id ? 0.6 : 1}
+                          onPress={(event) => {
+                            event.stopPropagation();
+                            void handleLowStockChange(inventory, !item.lowStock);
+                          }}
+                        >
+                          <StatusToggleChipText
+                            color={item.lowStock ? "#B34242" : COLORS.textDark}
+                          >
+                            {updatingLowStockId === inventory.id
+                              ? "Saving…"
+                              : item.lowStock
+                                ? "Low Stock"
+                                : "Mark Low Stock"}
+                          </StatusToggleChipText>
+                        </StatusToggleChip>
+                      </View>
+
+                      {item.displayNotes ? (
+                        <InventoryMeta numberOfLines={2}>
+                          {item.displayNotes}
+                        </InventoryMeta>
+                      ) : null}
                     </View>
 
-                    <QuantityControl>
-                      <QuantityButton
-                        accessibilityLabel={`Decrease quantity for ${item.name}`}
-                        opacity={item.quantity <= 1 || updatingQuantityId === item.id ? 0.45 : 1}
-                        onPress={() => void handleQuantityChange(item, -1)}
+                    <InventoryActionRow>
+                      <InventoryBadge backgroundColor={item.badgeBackgroundColor}>
+                        <InventoryBadgeText color={item.badgeTextColor}>
+                          {item.badgeLabel}
+                        </InventoryBadgeText>
+                      </InventoryBadge>
+                      <DeleteChip
+                        accessibilityLabel={`Delete ${inventory.name}`}
+                        onPress={(event) => {
+                          event.stopPropagation();
+                          confirmDeleteItem(inventory);
+                        }}
                       >
-                        <QuantityButtonText>−</QuantityButtonText>
-                      </QuantityButton>
-
-                      <QuantityValue>
-                        {updatingQuantityId === item.id
-                          ? "Saving…"
-                          : `Qty ${item.quantity}`}
-                      </QuantityValue>
-
-                      <QuantityButton
-                        accessibilityLabel={`Increase quantity for ${item.name}`}
-                        opacity={updatingQuantityId === item.id ? 0.45 : 1}
-                        onPress={() => void handleQuantityChange(item, 1)}
-                      >
-                        <QuantityButtonText>+</QuantityButtonText>
-                      </QuantityButton>
-                    </QuantityControl>
-
-                    {getPantryItemDisplayNotes(item.notes) ? (
-                      <InventoryMeta numberOfLines={2}>
-                        {getPantryItemDisplayNotes(item.notes)}
+                        <DeleteChipText>
+                          {deletingItemId === inventory.id ? "Deleting…" : "Delete"}
+                        </DeleteChipText>
+                      </DeleteChip>
+                      <InventoryMeta color={activeSpacePalette.accent}>
+                        Edit →
                       </InventoryMeta>
-                    ) : null}
-                  </View>
-
-                  <InventoryActionRow>
-                    <InventoryBadge
-                      backgroundColor={getInventoryBadgeColors(item).backgroundColor}
-                    >
-                      <InventoryBadgeText
-                        color={getInventoryBadgeColors(item).textColor}
-                    >
-                      {getInventoryBadgeCopy(item)}
-                    </InventoryBadgeText>
-                    </InventoryBadge>
-                    <DeleteChip
-                      accessibilityLabel={`Delete ${item.name}`}
-                      onPress={(event) => {
-                        event.stopPropagation();
-                        confirmDeleteItem(item);
-                      }}
-                    >
-                      <DeleteChipText>
-                        {deletingItemId === item.id ? "Deleting…" : "Delete"}
-                      </DeleteChipText>
-                    </DeleteChip>
-                    <InventoryMeta color={COLORS.deepGreen}>Edit →</InventoryMeta>
-                  </InventoryActionRow>
-                </InventoryRow>
-              </InventoryCard>
-            </InventoryCardPressable>
-          ))
-        )}
-      </Section>
+                    </InventoryActionRow>
+                  </InventoryRow>
+                </InventoryCard>
+              </InventoryCardPressable>
+            </Section>
+          );
+        }}
+      />
     );
   }
 
@@ -2588,8 +3224,10 @@ export default function DashboardScreen({
     return (
       <Section>
         <DashboardHeader paddingLeft={0} paddingRight={0}>
+          {renderSpaceTabs()}
+
           <View gap={8}>
-            <SectionTitle>Upcoming Expiry</SectionTitle>
+            <SectionTitle>{activeSpaceConfig.label} Alerts</SectionTitle>
             <SectionBody>
               Review every item that is within 3 days of expiry and prioritize the
               next moves before stock slips.
@@ -2622,7 +3260,7 @@ export default function DashboardScreen({
               alignSelf="flex-start"
               backgroundColor={COLORS.surfaceSoft}
               marginTop={6}
-              onPress={onOpenExpired}
+              onPress={() => onOpenExpired(activeInventorySpace)}
             >
               <HeroChipText color={COLORS.textDark}>Open Expired Queue</HeroChipText>
             </HeroChip>
@@ -2637,21 +3275,24 @@ export default function DashboardScreen({
             </SectionBody>
           </EmptyCard>
         ) : (
-          upcomingExpiryItems.map((item) => (
+          paginatedUpcomingExpiryItems.map((item) => {
+            const record = item.item;
+
+            return (
             <InventoryCardPressable
-              key={item.id}
-              accessibilityLabel={`Edit ${item.name} from upcoming expiry list`}
+              key={record.id}
+              accessibilityLabel={`Edit ${record.name} from upcoming expiry list`}
               accessibilityRole="button"
-              onPress={() => startEditFlow(item)}
+              onPress={() => startEditFlow(record)}
             >
               <InventoryCard>
                 <InventoryRow alignItems="flex-start">
                   <InventoryMedia>
-                    {item.photo_url ? (
+                    {record.photo_url ? (
                       <Image
-                        accessibilityLabel={`${item.name} photo`}
+                        accessibilityLabel={`${record.name} photo`}
                         resizeMode="cover"
-                        source={{ uri: item.photo_url }}
+                        source={{ uri: record.photo_url }}
                         style={styles.inventoryImage}
                       />
                     ) : (
@@ -2661,48 +3302,186 @@ export default function DashboardScreen({
 
                   <View gap={8} flex={1} minWidth={0}>
                     <View gap={4}>
-                      <Eyebrow>{item.category || "Uncategorized"}</Eyebrow>
-                      <InventoryName>{item.name}</InventoryName>
+                      <Eyebrow color={activeSpacePalette.accent}>
+                        {item.categoryLabel}
+                      </Eyebrow>
+                      <InventoryName>{record.name}</InventoryName>
                       <InventoryMeta>
-                        Qty {item.quantity} · {formatExpiryCopy(item.expiry_date)}
+                        Qty {record.quantity} · {item.expiryLabel}
                       </InventoryMeta>
                     </View>
 
-                    {getPantryItemDisplayNotes(item.notes) ? (
+                    {item.displayNotes ? (
                       <InventoryMeta numberOfLines={2}>
-                        {getPantryItemDisplayNotes(item.notes)}
+                        {item.displayNotes}
                       </InventoryMeta>
                     ) : null}
                   </View>
 
                   <InventoryActionRow>
-                    <InventoryBadge
-                      backgroundColor={getInventoryBadgeColors(item).backgroundColor}
-                    >
-                      <InventoryBadgeText
-                        color={getInventoryBadgeColors(item).textColor}
-                      >
-                        {getInventoryBadgeCopy(item)}
+                    <InventoryBadge backgroundColor={item.badgeBackgroundColor}>
+                      <InventoryBadgeText color={item.badgeTextColor}>
+                        {item.badgeLabel}
                       </InventoryBadgeText>
                     </InventoryBadge>
                     <DeleteChip
-                      accessibilityLabel={`Delete ${item.name}`}
+                      accessibilityLabel={`Delete ${record.name}`}
                       onPress={(event) => {
                         event.stopPropagation();
-                        confirmDeleteItem(item);
+                        confirmDeleteItem(record);
                       }}
                     >
                       <DeleteChipText>
-                        {deletingItemId === item.id ? "Deleting…" : "Delete"}
+                        {deletingItemId === record.id ? "Deleting…" : "Delete"}
                       </DeleteChipText>
                     </DeleteChip>
-                    <InventoryMeta color={COLORS.deepGreen}>Edit →</InventoryMeta>
+                    <InventoryMeta color={activeSpacePalette.accent}>Edit →</InventoryMeta>
                   </InventoryActionRow>
                 </InventoryRow>
               </InventoryCard>
             </InventoryCardPressable>
-          ))
+            );
+          })
         )}
+        {renderLoadMoreFooter("alerts")}
+      </Section>
+    );
+  }
+
+  function renderLowStockView() {
+    if (isItemsLoading && pantryItems.length === 0) {
+      return (
+        <Section>
+          <DashboardHeader paddingLeft={0} paddingRight={0}>
+            {renderSpaceTabs()}
+
+            <View gap={12}>
+              <SkeletonBlock height={30} width="52%" />
+              <SkeletonBlock height={16} width="82%" />
+            </View>
+          </DashboardHeader>
+
+          <SkeletonCard marginTop={0}>
+            <SkeletonBlock height={18} width="44%" />
+            <SkeletonBlock height={16} width="82%" />
+          </SkeletonCard>
+
+          {Array.from({ length: 2 }).map((_, index) => (
+            <SkeletonCard key={index}>
+              <InventoryRow alignItems="flex-start">
+                <SkeletonBlock height={68} width={68} borderRadius={18} />
+                <View gap={8} flex={1}>
+                  <SkeletonBlock height={12} width="28%" />
+                  <SkeletonBlock height={18} width="60%" />
+                  <SkeletonBlock height={14} width="74%" />
+                </View>
+                <SkeletonBlock height={28} width={74} borderRadius={999} />
+              </InventoryRow>
+            </SkeletonCard>
+          ))}
+        </Section>
+      );
+    }
+
+    return (
+      <Section>
+        <DashboardHeader paddingLeft={0} paddingRight={0}>
+          {renderSpaceTabs()}
+
+          <View gap={8}>
+            <SectionTitle>{activeSpaceConfig.label} Low Stock</SectionTitle>
+            <SectionBody>
+              Review the items currently marked low stock so you can replenish them
+              before the shelf goes empty.
+            </SectionBody>
+          </View>
+        </DashboardHeader>
+
+        <LowStockSummaryCard>
+          <LowStockSummaryEyebrow>{activeSpaceConfig.shortLabel} Queue</LowStockSummaryEyebrow>
+          <LowStockSummaryValue>
+            {lowStockItems.length} {lowStockItems.length === 1 ? "Item" : "Items"}
+          </LowStockSummaryValue>
+          <LowStockSummaryCopy>
+            Keep this queue light so your inventory stays easy to trust.
+          </LowStockSummaryCopy>
+        </LowStockSummaryCard>
+
+        {lowStockItems.length === 0 ? (
+          <EmptyCard>
+            <SectionHeading>No Low Stock Items</SectionHeading>
+            <SectionBody>
+              You do not currently have any items marked low stock in this space.
+            </SectionBody>
+          </EmptyCard>
+        ) : (
+          paginatedLowStockItems.map((item) => {
+            const record = item.item;
+
+            return (
+            <InventoryCardPressable
+              key={record.id}
+              accessibilityLabel={`Open ${record.name}`}
+              accessibilityRole="button"
+              onPress={() => startEditFlow(record)}
+            >
+              <InventoryCard>
+                <InventoryRow alignItems="flex-start">
+                  <InventoryMedia>
+                    {record.photo_url ? (
+                      <Image
+                        accessibilityLabel={`${record.name} photo`}
+                        resizeMode="cover"
+                        source={{ uri: record.photo_url }}
+                        style={styles.inventoryImage}
+                      />
+                    ) : (
+                      <InventoryImageFallback>◔</InventoryImageFallback>
+                    )}
+                  </InventoryMedia>
+
+                  <View gap={8} flex={1} minWidth={0}>
+                    <View gap={4}>
+                      <Eyebrow color={activeSpacePalette.accent}>
+                        {item.categoryLabel}
+                      </Eyebrow>
+                      <InventoryName>{record.name}</InventoryName>
+                      <InventoryMeta>
+                        Qty {record.quantity} · {item.expiryLabel}
+                      </InventoryMeta>
+                    </View>
+
+                    {item.displayNotes ? (
+                      <InventoryMeta numberOfLines={2}>
+                        {item.displayNotes}
+                      </InventoryMeta>
+                    ) : null}
+                  </View>
+
+                  <InventoryActionRow>
+                    <InventoryBadge backgroundColor="#E8FAF0">
+                      <InventoryBadgeText color="#0B7B44">Low Stock</InventoryBadgeText>
+                    </InventoryBadge>
+                    <DeleteChip
+                      accessibilityLabel={`Delete ${record.name}`}
+                      onPress={(event) => {
+                        event.stopPropagation();
+                        confirmDeleteItem(record);
+                      }}
+                    >
+                      <DeleteChipText>
+                        {deletingItemId === record.id ? "Deleting…" : "Delete"}
+                      </DeleteChipText>
+                    </DeleteChip>
+                    <InventoryMeta color={activeSpacePalette.accent}>Open →</InventoryMeta>
+                  </InventoryActionRow>
+                </InventoryRow>
+              </InventoryCard>
+            </InventoryCardPressable>
+            );
+          })
+        )}
+        {renderLoadMoreFooter("low_stock")}
       </Section>
     );
   }
@@ -2769,6 +3548,56 @@ export default function DashboardScreen({
           </ProfileMeta>
 
           <SettingsCard>
+            <SettingRow>
+              <View flex={1} gap={4}>
+                <SettingTitle>Notify me 30 days before expiry</SettingTitle>
+                <SettingBody>
+                  Get an early reminder when an item enters the 30-day window.
+                </SettingBody>
+              </View>
+
+              <Switch
+                disabled={!profileSupportsReminderSettings || savingPreferenceKey !== null}
+                ios_backgroundColor="#D9E5DD"
+                onValueChange={(value) =>
+                  void handleNotificationPreferenceChange(
+                    "notify_thirty_days_before_expiry",
+                    value,
+                  )
+                }
+                thumbColor={COLORS.white}
+                trackColor={{ false: "#D9E5DD", true: COLORS.leaf }}
+                value={notifyThirtyDaysBeforeExpiry}
+              />
+            </SettingRow>
+
+            <View height={1} backgroundColor={COLORS.pageLine} />
+
+            <SettingRow>
+              <View flex={1} gap={4}>
+                <SettingTitle>Notify me 15 days before expiry</SettingTitle>
+                <SettingBody>
+                  Get a mid-range reminder when an item enters the 15-day window.
+                </SettingBody>
+              </View>
+
+              <Switch
+                disabled={!profileSupportsReminderSettings || savingPreferenceKey !== null}
+                ios_backgroundColor="#D9E5DD"
+                onValueChange={(value) =>
+                  void handleNotificationPreferenceChange(
+                    "notify_fifteen_days_before_expiry",
+                    value,
+                  )
+                }
+                thumbColor={COLORS.white}
+                trackColor={{ false: "#D9E5DD", true: COLORS.leaf }}
+                value={notifyFifteenDaysBeforeExpiry}
+              />
+            </SettingRow>
+
+            <View height={1} backgroundColor={COLORS.pageLine} />
+
             <SettingRow>
               <View flex={1} gap={4}>
                 <SettingTitle>Notify me 3 days before expiry</SettingTitle>
@@ -2854,6 +3683,10 @@ export default function DashboardScreen({
       return renderInventoryView();
     }
 
+    if (activeTab === "low_stock") {
+      return renderLowStockView();
+    }
+
     if (activeTab === "alerts") {
       return renderAlertsView();
     }
@@ -2863,50 +3696,76 @@ export default function DashboardScreen({
 
   return (
     <DashboardShell>
-      <ScrollView
-        key={activeTab}
-        contentContainerStyle={styles.dashboardContent}
-        keyboardDismissMode="on-drag"
-        keyboardShouldPersistTaps="always"
-        showsVerticalScrollIndicator={false}
-      >
-        {renderContent()}
-      </ScrollView>
+      {activeTab === "inventory" ? (
+        renderInventoryView()
+      ) : (
+        <ScrollView
+          key={activeTab}
+          contentContainerStyle={styles.dashboardContent}
+          keyboardDismissMode="on-drag"
+          keyboardShouldPersistTaps="always"
+          onScroll={handleDashboardScroll}
+          showsVerticalScrollIndicator={false}
+          scrollEventThrottle={16}
+        >
+          {renderContent()}
+        </ScrollView>
+      )}
 
       <BottomBar
-        alignSelf={shouldSpreadTabs ? undefined : "center"}
-        gap={shouldSpreadTabs ? 0 : 8}
-        justifyContent={shouldSpreadTabs ? "space-between" : "center"}
-        left={shouldSpreadTabs ? 14 : undefined}
-        right={shouldSpreadTabs ? 14 : undefined}
+        alignSelf="center"
+        gap={navBarGap}
+        justifyContent="center"
+        bottom={navBottomOffset}
+        paddingVertical={navPaddingVertical}
+        paddingHorizontal={navPaddingHorizontal}
       >
         {visibleTabs.map((tab) => {
           const active = tab.key === activeTab;
           const iconName = active ? tab.activeIcon : tab.icon;
           const isAlertsTab = tab.key === "alerts";
-          const badgeCount = isAlertsTab ? nearExpiryCount : 0;
+          const isLowStockTab = tab.key === "low_stock";
+          const badgeCount = isAlertsTab ? nearExpiryCount : isLowStockTab ? lowStockItems.length : 0;
           const tabBackgroundColor = active
             ? isAlertsTab
               ? "#FFE7DF"
-              : COLORS.white
+              : isLowStockTab
+                ? "#FFF3E7"
+                : COLORS.white
             : isAlertsTab
               ? "rgba(214,90,90,0.14)"
+              : isLowStockTab
+                ? "rgba(242,167,64,0.14)"
               : "transparent";
           const iconColor = active
             ? isAlertsTab
               ? "#B34242"
-              : COLORS.night
+              : isLowStockTab
+                ? "#A86518"
+                : COLORS.night
             : isAlertsTab
               ? "#FFC9B8"
+              : isLowStockTab
+                ? "#E0B15F"
               : "rgba(255,255,255,0.74)";
           const labelColor = active
             ? isAlertsTab
               ? "#B34242"
-              : COLORS.night
+              : isLowStockTab
+                ? "#A86518"
+                : COLORS.night
             : isAlertsTab
               ? "#FFD8CC"
+              : isLowStockTab
+                ? "#E6C486"
               : "rgba(255,255,255,0.74)";
-          const badgeBackgroundColor = active ? "#B34242" : "#F06A52";
+          const badgeBackgroundColor = active
+            ? isLowStockTab
+              ? "#A86518"
+              : "#B34242"
+            : isLowStockTab
+              ? "#D89A34"
+              : "#F06A52";
           const badgeTextColor = COLORS.white;
 
           return (
@@ -2916,15 +3775,29 @@ export default function DashboardScreen({
               backgroundColor={tabBackgroundColor}
               borderColor={isAlertsTab ? "rgba(240,106,82,0.26)" : "transparent"}
               borderWidth={isAlertsTab ? 1 : 0}
-              minWidth={shouldSpreadTabs ? 0 : 72}
-              width={shouldSpreadTabs ? "24%" : undefined}
+              minWidth={
+                isAlertsTab
+                  ? shouldCompactTabs
+                    ? 88
+                    : 96
+                  : isLowStockTab
+                    ? shouldCompactTabs
+                      ? 92
+                      : 100
+                    : shouldCompactTabs
+                      ? 70
+                      : 78
+              }
+              paddingHorizontal={navTabPaddingHorizontal}
+              paddingVertical={navTabPaddingVertical}
+              gap={navTabGap}
               onPress={() => handleTabPress(tab.key)}
             >
               <BottomTabInner>
                 <Ionicons
                   color={iconColor}
                   name={iconName}
-                  size={19}
+                  size={navIconSize}
                 />
                 {badgeCount > 0 ? (
                   <BottomTabBadge backgroundColor={badgeBackgroundColor}>
@@ -2934,7 +3807,13 @@ export default function DashboardScreen({
                   </BottomTabBadge>
                 ) : null}
               </BottomTabInner>
-              <BottomTabText color={labelColor} numberOfLines={1}>
+              <BottomTabText
+                color={labelColor}
+                fontSize={navLabelFontSize}
+                lineHeight={navLabelLineHeight}
+                ellipsizeMode="tail"
+                numberOfLines={1}
+              >
                 {tab.label}
               </BottomTabText>
             </BottomTab>
@@ -2995,6 +3874,12 @@ export default function DashboardScreen({
 
 const styles = StyleSheet.create({
   dashboardContent: {
+    paddingBottom: 128,
+  },
+  inventoryList: {
+    flex: 1,
+  },
+  inventoryListContent: {
     paddingBottom: 128,
   },
   headerAvatarImage: {

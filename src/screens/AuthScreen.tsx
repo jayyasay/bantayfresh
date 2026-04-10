@@ -397,6 +397,8 @@ export default function AuthScreen({ onAuthSuccess }: AuthScreenProps) {
   return (
     <ScrollView
       contentContainerStyle={styles.content}
+      keyboardDismissMode="on-drag"
+      keyboardShouldPersistTaps="handled"
       showsVerticalScrollIndicator={false}
       bounces={false}
     >
@@ -630,6 +632,7 @@ const styles = StyleSheet.create({
     justifyContent: "flex-start",
     paddingVertical: 0,
     paddingHorizontal: 0,
+    paddingBottom: 32,
   },
   input: {
     fontSize: 16,

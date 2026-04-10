@@ -24,6 +24,7 @@ import ExpiredItemsScreen from "./src/screens/ExpiredItemsScreen";
 import PantryItemFormScreen from "./src/screens/PantryItemFormScreen";
 import SplashScreen from "./src/screens/SplashScreen";
 import { COLORS } from "./src/theme/colors";
+import type { InventorySpaceKey } from "./lib/inventory-spaces";
 import type { PantryItemRecord } from "./lib/pantry-items";
 import { getOrCreateProfile, type ProfileRecord } from "./lib/profiles";
 import { signOutCurrentUser, supabase } from "./lib/supabase";
@@ -34,19 +35,20 @@ const Screen = styled(View, {
 });
 
 type RootStackParamList = {
-  BulkUpload: undefined;
+  BulkUpload: { inventorySpace: InventorySpaceKey };
   CreateItem:
     | {
         prefill?: {
           barcode?: string | null;
           category?: string | null;
+          inventorySpace?: InventorySpaceKey | null;
           name?: string | null;
         };
       }
     | undefined;
   DashboardMain: undefined;
   EditItem: { item: PantryItemRecord };
-  ExpiredItems: undefined;
+  ExpiredItems: { inventorySpace: InventorySpaceKey };
 };
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
@@ -266,7 +268,7 @@ export default function App() {
         {splashVisible ? <SplashScreen /> : null}
         {!splashVisible && !session ? (
           <KeyboardAvoidingView
-            behavior={Platform.OS === "ios" ? "padding" : undefined}
+            behavior={Platform.OS === "ios" ? "padding" : "height"}
             style={styles.keyboardShell}
           >
             <AuthScreen />
@@ -290,7 +292,11 @@ export default function App() {
                     isLoggingOut={isSigningOut}
                     isProfileLoading={isProfileLoading}
                     onLogout={handleLogout}
-                    onOpenBulkUpload={() => navigation.navigate("BulkUpload")}
+                    onOpenBulkUpload={(inventorySpace) =>
+                      navigation.navigate("BulkUpload", {
+                        inventorySpace,
+                      })
+                    }
                     onOpenCreate={(prefill) =>
                       navigation.navigate("CreateItem", {
                         prefill,
@@ -301,7 +307,11 @@ export default function App() {
                         item,
                       })
                     }
-                    onOpenExpired={() => navigation.navigate("ExpiredItems")}
+                    onOpenExpired={(inventorySpace) =>
+                      navigation.navigate("ExpiredItems", {
+                        inventorySpace,
+                      })
+                    }
                     onProfileUpdated={handleProfileUpdated}
                     onShowToast={setDashboardToastMessage}
                     onTabChange={setActiveTab}
@@ -322,8 +332,9 @@ export default function App() {
                   gestureEnabled: true,
                 }}
               >
-                {({ navigation }) => (
+                {({ navigation, route }) => (
                   <BulkUploadScreen
+                    inventorySpace={route.params.inventorySpace}
                     onBack={() => navigation.goBack()}
                     onImported={(message) => {
                       handlePantryItemSaved(message);
@@ -390,8 +401,9 @@ export default function App() {
                   gestureEnabled: true,
                 }}
               >
-                {({ navigation }) => (
+                {({ navigation, route }) => (
                   <ExpiredItemsScreen
+                    inventorySpace={route.params.inventorySpace}
                     onBack={() => navigation.goBack()}
                     onItemsChanged={handlePantryItemsChanged}
                     onOpenEdit={(item) =>
